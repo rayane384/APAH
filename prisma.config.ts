@@ -4,12 +4,17 @@
 import "dotenv/config";
 import { defineConfig, env } from "prisma/config";
 
-export default defineConfig({
+// `engine` is not part of the strict PrismaConfig typings in some versions,
+// cast to `any` to allow the classic engine to be used by the generated client.
+const cfg: any = {
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
   },
+  engine: "classic",
   datasource: {
     url: env("DATABASE_URL"),
   },
-});
+};
+
+export default defineConfig(cfg as any);
