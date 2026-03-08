@@ -1,7 +1,9 @@
-import NextAuth from "next-auth";
+import NextAuth, { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcrypt";
 import { PrismaClient } from "./app/generated/prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import pg from "pg";
 
 type NextAuthUser = {
   id: string;
@@ -21,10 +23,16 @@ type AuthorizedUser = {
   departmentId?: string | null;
 };
 
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const prisma = new PrismaClient({} as unknown as any);
+const prisma = new PrismaClient({ adapter } as any);
 
-export const { handlers, auth } = NextAuth({
+function getPrisma() {
+  return prisma;
+}
+
+export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
   providers: [
     CredentialsProvider({
@@ -39,21 +47,27 @@ export const { handlers, auth } = NextAuth({
 
         if (!email || !password) return null;
 
-        const user = await prisma.user.findUnique({ where: { email } });
-        if (!user) return null;
+        try {
+          const db = getPrisma();
+          const user = await db.user.findUnique({ where: { email } });
+          if (!user) return null;
 
-        const ok = await bcrypt.compare(password, user.password);
-        if (!ok) return null;
+          const ok = await bcrypt.compare(password, user.password);
+          if (!ok) return null;
 
-        // Ce que NextAuth mettra dans le token "user"
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.fullName,
-          role: user.role,
-          profile: user.profile,
-          departmentId: user.departmentId,
-        } as AuthorizedUser;
+          // Ce que NextAuth mettra dans le token "user"
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.fullName,
+            role: user.role,
+            profile: user.profile,
+            departmentId: user.departmentId,
+          } as AuthorizedUser;
+        } catch (err) {
+          console.error("[AUTH] authorize error:", err);
+          return null;
+        }
       },
     }),
   ],
@@ -79,4 +93,7 @@ export const { handlers, auth } = NextAuth({
       return session;
     },
   },
-});
+};
+
+const handler = NextAuth(authOptions);
+export { handler as handlers };
