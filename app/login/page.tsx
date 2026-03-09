@@ -3,6 +3,7 @@
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useState, Suspense } from "react";
+import Image from "next/image";
 
 function LoginForm() {
   const router = useRouter();
@@ -37,41 +38,54 @@ function LoginForm() {
   }
 
   return (
-    <div className="uk-flex uk-flex-center uk-flex-middle uk-height-viewport uk-background-muted">
-      <div className="uk-card uk-card-default uk-card-body uk-width-medium">
-        <h3 className="uk-card-title uk-text-center">Ticket System</h3>
-        <p className="uk-text-center uk-text-muted uk-text-small">Sign in to your account</p>
-
-        {error && (
-          <div className="uk-alert uk-alert-danger uk-margin-small-top" data-uk-alert>
-            <p>{error}</p>
+    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="w-full max-w-md">
+        {/* Logo & Title */}
+        <div className="text-center mb-8">
+          <div className="flex justify-center mb-4">
+            <Image
+              src="/logo.png"
+              alt="Logo"
+              width={600}
+              height={162}
+              className="h-16 w-auto"
+              priority
+            />
           </div>
-        )}
+          <h1 className="text-2xl font-bold text-foreground">Ticket System</h1>
+          <p className="text-sm text-brand-gray-light mt-1">Sign in to your account</p>
+        </div>
 
-        <form onSubmit={handleSubmit} className="uk-form-stacked uk-margin-top">
-          <div className="uk-margin">
-            <label className="uk-form-label" htmlFor="email">
-              Email
-            </label>
-            <div className="uk-form-controls">
+        {/* Card */}
+        <div className="card">
+          {error && (
+            <div className="alert alert-error mb-4">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div>
+              <label className="form-label" htmlFor="email">
+                Email
+              </label>
               <input
-                className="uk-input"
+                className="form-input"
                 id="email"
                 name="email"
                 type="email"
                 placeholder="you@example.com"
                 required
+                autoFocus
               />
             </div>
-          </div>
 
-          <div className="uk-margin">
-            <label className="uk-form-label" htmlFor="password">
-              Password
-            </label>
-            <div className="uk-form-controls">
+            <div>
+              <label className="form-label" htmlFor="password">
+                Password
+              </label>
               <input
-                className="uk-input"
+                className="form-input"
                 id="password"
                 name="password"
                 type="password"
@@ -79,18 +93,27 @@ function LoginForm() {
                 required
               />
             </div>
-          </div>
 
-          <div className="uk-margin">
             <button
-              className="uk-button uk-button-primary uk-width-1-1"
+              className="btn btn-primary w-full justify-center py-2.5"
               type="submit"
               disabled={loading}
             >
-              {loading ? "Signing in…" : "Sign In"}
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <span className="spinner" style={{ width: "1rem", height: "1rem", borderWidth: "2px" }} />
+                  Signing in…
+                </span>
+              ) : (
+                "Sign In"
+              )}
             </button>
-          </div>
-        </form>
+          </form>
+        </div>
+
+        <p className="text-center text-xs text-brand-gray-light mt-6">
+          Internal access only — contact your administrator for credentials
+        </p>
       </div>
     </div>
   );
@@ -100,8 +123,8 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="uk-flex uk-flex-center uk-flex-middle uk-height-viewport">
-          <div data-uk-spinner />
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="spinner" />
         </div>
       }
     >

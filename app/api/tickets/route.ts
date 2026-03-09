@@ -17,16 +17,25 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const status = searchParams.get("status");
   const sort = searchParams.get("sort") ?? "newest";
+  const direction = searchParams.get("direction"); // "sent" | "received" | null
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = {};
 
   if (isAdmin(user)) {
-    // Admin sees tickets assigned to their department AND tickets they created
-    where.OR = [
-      { assignedDepartmentId: user.departmentId },
-      { createdById: user.id },
-    ];
+    if (direction === "sent") {
+      // Only tickets the admin created
+      where.createdById = user.id;
+    } else if (direction === "received") {
+      // Only tickets assigned to the admin's department
+      where.assignedDepartmentId = user.departmentId;
+    } else {
+      // All: assigned to department OR created by admin
+      where.OR = [
+        { assignedDepartmentId: user.departmentId },
+        { createdById: user.id },
+      ];
+    }
   } else {
     // Non-admin sees only their own tickets
     where.createdById = user.id;
@@ -64,11 +73,10 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { categoryId, subtype, description, assignedDepartmentId: targetDeptId } = body as {
+  const { categoryId, subtype, description } = body as {
     categoryId: string;
     subtype?: string;
     description: string;
-    assignedDepartmentId?: string;
   };
 
   if (!categoryId || !description?.trim()) {
@@ -96,18 +104,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Determine assigned department:
-  // - Admins can specify a target department (inter-department tickets)
-  // - Otherwise, falls back to the category's owner department
-  let assignedDepartmentId = category.ownerDepartmentId;
-  if (targetDeptId && isAdmin(user)) {
-    // Verify the target department exists
-    const dept = await prisma.department.findUnique({ where: { id: targetDeptId } });
-    if (!dept) {
-      return NextResponse.json({ error: "Target department not found." }, { status: 404 });
-    }
-    assignedDepartmentId = dept.id;
-  }
+  // Department is always determined by the category
+  const assignedDepartmentId = category.ownerDepartmentId;
 
   // Create the ticket
   const ticket = await prisma.ticket.create({

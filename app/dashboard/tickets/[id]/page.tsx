@@ -25,14 +25,14 @@ type Ticket = {
   createdBy: { id: string; fullName: string; email: string; role: string; profile: string | null };
   assignedDepartment: { id: string; name: string; code: string };
   comments: Comment[];
-  reservationRequest: null; // future use
+  reservationRequest: null;
 };
 
-const STATUS_CLASSES: Record<string, string> = {
-  NEW: "uk-label-warning",
-  IN_PROGRESS: "uk-label-primary",
-  RESOLVED: "uk-label-success",
-  DECLINED: "uk-label-danger",
+const STATUS_BADGE: Record<string, string> = {
+  NEW: "badge-new",
+  IN_PROGRESS: "badge-in-progress",
+  RESOLVED: "badge-resolved",
+  DECLINED: "badge-declined",
 };
 
 const STATUS_OPTIONS = ["NEW", "IN_PROGRESS", "RESOLVED", "DECLINED"];
@@ -45,11 +45,8 @@ export default function TicketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Comment form
   const [commentBody, setCommentBody] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
-
-  // Status update
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
   const user = session?.user;
@@ -106,17 +103,19 @@ export default function TicketDetailPage() {
 
   if (loading) {
     return (
-      <div className="uk-text-center uk-padding">
-        <div data-uk-spinner />
+      <div className="flex justify-center py-12">
+        <div className="spinner" />
       </div>
     );
   }
 
   if (error || !ticket) {
     return (
-      <div className="uk-alert uk-alert-danger">
-        <p>{error || "Ticket not found."}</p>
-        <Link href="/dashboard/tickets" className="uk-button uk-button-default uk-button-small">
+      <div>
+        <div className="alert alert-error">
+          {error || "Ticket not found."}
+        </div>
+        <Link href="/dashboard/tickets" className="btn btn-outline btn-sm mt-2">
           ← Back to Tickets
         </Link>
       </div>
@@ -125,47 +124,47 @@ export default function TicketDetailPage() {
 
   return (
     <div>
-      <div className="uk-flex uk-flex-between uk-flex-middle uk-margin-bottom">
+      {/* Breadcrumb + title */}
+      <Link href="/dashboard/tickets" className="btn btn-ghost btn-sm mb-3 -ml-2">
+        ← Back to Tickets
+      </Link>
+
+      <div className="page-header flex items-start justify-between flex-wrap gap-4">
         <div>
-          <Link href="/dashboard/tickets" className="uk-button uk-button-text uk-button-small">
-            ← Back to Tickets
-          </Link>
-          <h2 className="uk-heading-small uk-margin-small-top uk-margin-remove-bottom">
+          <h2 className="text-2xl">
             {ticket.category.name}
             {ticket.subtype && (
-              <span className="uk-text-muted"> / {ticket.subtype}</span>
+              <span className="opacity-70 font-normal"> / {ticket.subtype}</span>
             )}
           </h2>
-          <p className="uk-text-meta uk-margin-remove-top">
-            Ticket #{ticket.id.slice(-8).toUpperCase()}
-          </p>
+          <p>Ticket #{ticket.id.slice(-8).toUpperCase()}</p>
         </div>
-        <div>
-          <span className={`uk-label ${STATUS_CLASSES[ticket.status] ?? ""}`} style={{ fontSize: "1rem" }}>
-            {ticket.status.replace("_", " ")}
-          </span>
-        </div>
+        <span className={`badge ${STATUS_BADGE[ticket.status] ?? ""}`} style={{ fontSize: "0.9rem", padding: "0.3rem 1rem" }}>
+          {ticket.status.replace("_", " ")}
+        </span>
       </div>
 
-      <div className="uk-grid uk-grid-medium" data-uk-grid>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main content */}
-        <div className="uk-width-2-3@m">
+        <div className="lg:col-span-2 space-y-5">
           {/* Description */}
-          <div className="uk-card uk-card-default uk-card-body uk-margin-bottom">
-            <h4 className="uk-card-title">Description</h4>
-            <p style={{ whiteSpace: "pre-wrap" }}>{ticket.description}</p>
+          <div className="card">
+            <h3 className="text-sm font-semibold text-brand-gray-light uppercase tracking-wide mb-3">Description</h3>
+            <p className="text-foreground leading-relaxed whitespace-pre-wrap">{ticket.description}</p>
           </div>
 
           {/* Admin actions */}
           {isAssignedAdmin && (
-            <div className="uk-card uk-card-default uk-card-body uk-margin-bottom">
-              <h4 className="uk-card-title">Admin Actions</h4>
-              <div className="uk-button-group">
+            <div className="card">
+              <h3 className="text-sm font-semibold text-brand-gray-light uppercase tracking-wide mb-3">Update Status</h3>
+              <div className="flex flex-wrap gap-2">
                 {STATUS_OPTIONS.map((s) => (
                   <button
                     key={s}
-                    className={`uk-button uk-button-small ${
-                      ticket.status === s ? "uk-button-primary" : "uk-button-default"
+                    className={`btn btn-sm ${
+                      ticket.status === s
+                        ? "btn-primary"
+                        : "btn-outline"
                     }`}
                     disabled={ticket.status === s || updatingStatus}
                     onClick={() => handleStatusChange(s)}
@@ -175,7 +174,7 @@ export default function TicketDetailPage() {
                 ))}
               </div>
               {ticket.priority && (
-                <p className="uk-text-meta uk-margin-small-top">
+                <p className="form-hint mt-3">
                   AI Priority: <strong>{ticket.priority}</strong>
                   {ticket.aiReason && <> — {ticket.aiReason}</>}
                 </p>
@@ -184,84 +183,70 @@ export default function TicketDetailPage() {
           )}
 
           {/* Comments */}
-          <div className="uk-card uk-card-default uk-card-body">
-            <h4 className="uk-card-title">
+          <div className="card">
+            <h3 className="text-sm font-semibold text-brand-gray-light uppercase tracking-wide mb-4">
               Comments ({ticket.comments.length})
-            </h4>
+            </h3>
 
             {ticket.comments.length === 0 ? (
-              <p className="uk-text-muted">No comments yet.</p>
+              <p className="text-sm text-brand-gray-light">No comments yet.</p>
             ) : (
-              <ul className="uk-comment-list">
+              <div className="space-y-4 mb-5">
                 {ticket.comments.map((c) => (
-                  <li key={c.id} className="uk-margin-bottom">
-                    <article className="uk-comment">
-                      <header className="uk-comment-header uk-flex uk-flex-middle" style={{ gap: "0.5rem" }}>
-                        <span
-                          className="uk-border-circle uk-flex uk-flex-center uk-flex-middle"
-                          style={{
-                            width: 32,
-                            height: 32,
-                            background: c.author.role === "ADMIN" ? "#1e87f0" : "#999",
-                            color: "#fff",
-                            fontSize: "0.8rem",
-                            fontWeight: 700,
-                          }}
-                        >
-                          {c.author.fullName.charAt(0)}
+                  <div key={c.id} className="flex gap-3">
+                    <div
+                      className="avatar shrink-0 mt-0.5"
+                      style={{
+                        background: c.author.role === "ADMIN" ? "var(--brand-primary)" : "var(--brand-gray)",
+                      }}
+                    >
+                      {c.author.fullName.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-sm font-semibold">{c.author.fullName}</span>
+                        {c.author.role === "ADMIN" && (
+                          <span className="badge badge-admin" style={{ fontSize: "0.65rem", padding: "0.1rem 0.4rem" }}>ADMIN</span>
+                        )}
+                        <span className="text-xs text-brand-gray-light">
+                          {new Date(c.createdAt).toLocaleString()}
                         </span>
-                        <div>
-                          <h6 className="uk-comment-title uk-margin-remove" style={{ fontSize: "0.9rem" }}>
-                            {c.author.fullName}
-                            {c.author.role === "ADMIN" && (
-                              <span className="uk-badge uk-margin-small-left" style={{ fontSize: "0.65rem" }}>
-                                ADMIN
-                              </span>
-                            )}
-                          </h6>
-                          <p className="uk-comment-meta uk-margin-remove">
-                            {new Date(c.createdAt).toLocaleString()}
-                          </p>
-                        </div>
-                      </header>
-                      <div className="uk-comment-body uk-margin-small-top">
-                        <p style={{ whiteSpace: "pre-wrap" }}>{c.body}</p>
                       </div>
-                    </article>
-                  </li>
+                      <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{c.body}</p>
+                    </div>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
 
             {/* Add comment form */}
-            <hr className="uk-divider-icon" />
-            <form onSubmit={handleAddComment}>
-              <div className="uk-margin">
+            <div className="border-t border-border pt-4 mt-4">
+              <form onSubmit={handleAddComment}>
                 <textarea
-                  className="uk-textarea"
+                  className="form-textarea mb-3"
                   rows={3}
                   placeholder="Write a comment…"
                   value={commentBody}
                   onChange={(e) => setCommentBody(e.target.value)}
                   required
                 />
-              </div>
-              <button
-                className="uk-button uk-button-primary uk-button-small"
-                type="submit"
-                disabled={submittingComment || !commentBody.trim()}
-              >
-                {submittingComment ? "Posting…" : "Add Comment"}
-              </button>
-            </form>
+                <button
+                  className="btn btn-primary btn-sm"
+                  type="submit"
+                  disabled={submittingComment || !commentBody.trim()}
+                >
+                  {submittingComment ? "Posting…" : "Add Comment"}
+                </button>
+              </form>
+            </div>
           </div>
         </div>
 
         {/* Sidebar */}
-        <div className="uk-width-1-3@m">
-          <div className="uk-card uk-card-default uk-card-body uk-card-small">
-            <h5 className="uk-card-title">Details</h5>
-            <dl className="uk-description-list uk-description-list-divider">
+        <div className="lg:col-span-1">
+          <div className="card card-compact sticky top-20">
+            <h3 className="text-sm font-semibold text-brand-gray-light uppercase tracking-wide mb-4">Details</h3>
+            <dl className="detail-list">
               <dt>Category</dt>
               <dd>{ticket.category.name}</dd>
 
@@ -273,15 +258,31 @@ export default function TicketDetailPage() {
               )}
 
               <dt>Assigned Department</dt>
-              <dd>{ticket.assignedDepartment.name}</dd>
+              <dd>
+                <span className="badge badge-role">{ticket.assignedDepartment.name}</span>
+              </dd>
 
               <dt>Created By</dt>
               <dd>
-                {ticket.createdBy.fullName}
-                <br />
-                <span className="uk-text-muted uk-text-small">
-                  {ticket.createdBy.role === "ADMIN" ? "Admin" : ticket.createdBy.profile}
-                </span>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="avatar"
+                    style={{
+                      width: "1.5rem",
+                      height: "1.5rem",
+                      fontSize: "0.7rem",
+                      background: ticket.createdBy.role === "ADMIN" ? "var(--brand-primary)" : "var(--brand-gray)",
+                    }}
+                  >
+                    {ticket.createdBy.fullName.charAt(0)}
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium">{ticket.createdBy.fullName}</div>
+                    <div className="text-xs text-brand-gray-light">
+                      {ticket.createdBy.role === "ADMIN" ? "Admin" : ticket.createdBy.profile}
+                    </div>
+                  </div>
+                </div>
               </dd>
 
               <dt>Created</dt>

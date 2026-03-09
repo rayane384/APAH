@@ -13,19 +13,11 @@ type Category = {
   ownerDepartment: { id: string; name: string; code: string };
 };
 
-type Department = {
-  id: string;
-  name: string;
-  code: string;
-};
-
 export default function NewTicketPage() {
   const router = useRouter();
   const { data: session } = useSession();
-  const isAdmin = session?.user?.role === "ADMIN";
 
   const [categories, setCategories] = useState<Category[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -33,22 +25,18 @@ export default function NewTicketPage() {
   const [categoryId, setCategoryId] = useState("");
   const [subtype, setSubtype] = useState("");
   const [description, setDescription] = useState("");
-  const [targetDeptId, setTargetDeptId] = useState("");
+
+  const selectedCategory = categories.find((c) => c.id === categoryId);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/categories").then((r) => r.json()),
-      isAdmin ? fetch("/api/departments").then((r) => r.json()) : Promise.resolve([]),
-    ])
-      .then(([cats, depts]: [Category[], Department[]]) => {
+    fetch("/api/categories")
+      .then((r) => r.json())
+      .then((cats: Category[]) => {
         setCategories(cats);
-        setDepartments(depts);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [isAdmin]);
-
-  const selectedCategory = categories.find((c) => c.id === categoryId);
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -62,8 +50,6 @@ export default function NewTicketPage() {
       setError("Please enter a description.");
       return;
     }
-
-    // Block reservation category for now
     if (selectedCategory?.isReservation) {
       setError("Reservation tickets are coming soon. Please choose another category.");
       return;
@@ -78,7 +64,6 @@ export default function NewTicketPage() {
         categoryId,
         subtype: subtype || undefined,
         description,
-        ...(isAdmin && targetDeptId ? { assignedDepartmentId: targetDeptId } : {}),
       }),
     });
 
@@ -95,30 +80,33 @@ export default function NewTicketPage() {
 
   if (loading) {
     return (
-      <div className="uk-text-center uk-padding">
-        <div data-uk-spinner />
+      <div className="flex justify-center py-12">
+        <div className="spinner" />
       </div>
     );
   }
 
   return (
     <div>
-      <h2 className="uk-heading-small">Create New Ticket</h2>
+      {/* Page header */}
+      <div className="page-header mb-6">
+        <h2 className="text-2xl">Create New Ticket</h2>
+        <p>Fill in the details to submit a new ticket</p>
+      </div>
 
-      {error && (
-        <div className="uk-alert uk-alert-danger" data-uk-alert>
-          <a className="uk-alert-close" data-uk-close />
-          <p>{error}</p>
-        </div>
-      )}
+      <div className="card max-w-2xl">
+        {error && (
+          <div className="alert alert-error mb-5">
+            {error}
+          </div>
+        )}
 
-      <form onSubmit={handleSubmit} className="uk-form-stacked uk-width-xlarge">
-        {/* Category */}
-        <div className="uk-margin">
-          <label className="uk-form-label">Category *</label>
-          <div className="uk-form-controls">
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Category */}
+          <div>
+            <label className="form-label">Category *</label>
             <select
-              className="uk-select"
+              className="form-select"
               value={categoryId}
               onChange={(e) => setCategoryId(e.target.value)}
               required
@@ -131,7 +119,6 @@ export default function NewTicketPage() {
                     {c.name} ({c.ownerDepartment.name})
                   </option>
                 ))}
-              {/* Reservation category shown but disabled */}
               {categories
                 .filter((c) => c.isReservation)
                 .map((c) => (
@@ -140,60 +127,30 @@ export default function NewTicketPage() {
                   </option>
                 ))}
             </select>
+            {selectedCategory && (
+              <p className="form-hint mt-1">
+                Will be sent to: <strong>{selectedCategory.ownerDepartment.name}</strong>
+              </p>
+            )}
           </div>
-          {selectedCategory && (
-            <p className="uk-text-meta uk-margin-small-top">
-              Default department: <strong>{selectedCategory.ownerDepartment.name}</strong>
-            </p>
-          )}
-        </div>
 
-        {/* Target Department (admin only) */}
-        {isAdmin && (
-          <div className="uk-margin">
-            <label className="uk-form-label">Send to Department</label>
-            <div className="uk-form-controls">
-              <select
-                className="uk-select"
-                value={targetDeptId}
-                onChange={(e) => setTargetDeptId(e.target.value)}
-              >
-                <option value="">
-                  — Default ({selectedCategory?.ownerDepartment.name ?? "select category first"}) —
-                </option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} ({d.code})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <p className="uk-text-meta uk-margin-small-top">
-              As an admin, you can send this ticket to a specific department.
-            </p>
-          </div>
-        )}
-
-        {/* Subtype */}
-        <div className="uk-margin">
-          <label className="uk-form-label">Sub-type (optional)</label>
-          <div className="uk-form-controls">
+          {/* Subtype */}
+          <div>
+            <label className="form-label">Sub-type (optional)</label>
             <input
-              className="uk-input"
+              className="form-input"
               type="text"
               placeholder="e.g., Projector, Printer…"
               value={subtype}
               onChange={(e) => setSubtype(e.target.value)}
             />
           </div>
-        </div>
 
-        {/* Description */}
-        <div className="uk-margin">
-          <label className="uk-form-label">Description *</label>
-          <div className="uk-form-controls">
+          {/* Description */}
+          <div>
+            <label className="form-label">Description *</label>
             <textarea
-              className="uk-textarea"
+              className="form-textarea"
               rows={5}
               placeholder="Describe your issue or request…"
               value={description}
@@ -201,25 +158,33 @@ export default function NewTicketPage() {
               required
             />
           </div>
-        </div>
 
-        <div className="uk-margin">
-          <button
-            className="uk-button uk-button-primary"
-            type="submit"
-            disabled={submitting}
-          >
-            {submitting ? "Creating…" : "Submit Ticket"}
-          </button>
-          <button
-            className="uk-button uk-button-default uk-margin-small-left"
-            type="button"
-            onClick={() => router.push("/dashboard/tickets")}
-          >
-            Cancel
-          </button>
-        </div>
-      </form>
+          {/* Actions */}
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              className="btn btn-primary"
+              type="submit"
+              disabled={submitting}
+            >
+              {submitting ? (
+                <span className="flex items-center gap-2">
+                  <span className="spinner" style={{ width: "1rem", height: "1rem", borderWidth: "2px" }} />
+                  Creating…
+                </span>
+              ) : (
+                "Submit Ticket"
+              )}
+            </button>
+            <button
+              className="btn btn-outline"
+              type="button"
+              onClick={() => router.push("/dashboard/tickets")}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
