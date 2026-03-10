@@ -6,6 +6,7 @@
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../app/generated/prisma"
 }
 
 datasource db {
@@ -92,6 +93,7 @@ model User {
   department   Department? @relation("DepartmentAdmins", fields: [departmentId], references: [id])
 
   createdTickets Ticket[] @relation("TicketCreatedBy")
+  assignedTickets Ticket[] @relation("TicketAssignedTo")
   ticketComments TicketComment[]
 
   // opposite for ReservationRequest.processedBy
@@ -174,6 +176,9 @@ model Ticket {
   assignedDepartmentId String
   assignedDepartment   Department @relation("TicketAssignedDepartment", fields: [assignedDepartmentId], references: [id])
 
+  assignedToId String?
+  assignedTo   User? @relation("TicketAssignedTo", fields: [assignedToId], references: [id])
+
   comments      TicketComment[]
 
   reservationRequest ReservationRequest?
@@ -183,6 +188,7 @@ model Ticket {
 
   @@index([createdById])
   @@index([assignedDepartmentId])
+  @@index([assignedToId])
   @@index([status])
   @@index([priority])
   @@index([categoryId])

@@ -11,7 +11,12 @@ export default async function DashboardPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = admin
-    ? { OR: [{ assignedDepartmentId: user.departmentId }, { createdById: user.id }] }
+    ? {
+        OR: [
+          { assignedDepartmentId: user.departmentId },
+          { createdBy: { departmentId: user.departmentId, role: "ADMIN" } },
+        ],
+      }
     : { createdById: user.id };
 
   const [total, newCount, inProgress, resolved, declined] = await Promise.all([

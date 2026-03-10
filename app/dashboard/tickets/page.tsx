@@ -12,8 +12,16 @@ type Ticket = {
   priority: string | null;
   createdAt: string;
   category: { id: string; name: string; code: string; isReservation: boolean; isOther: boolean };
-  createdBy: { id: string; fullName: string; email: string; role: string; profile: string | null };
+  createdBy: {
+    id: string;
+    fullName: string;
+    email: string;
+    role: string;
+    profile: string | null;
+    department?: { id: string; name: string; code: string } | null;
+  };
   assignedDepartment: { id: string; name: string; code: string };
+  assignedTo: { id: string; fullName: string; email: string } | null;
   _count: { comments: number };
 };
 
@@ -81,6 +89,7 @@ export default function TicketListPage() {
             <option value="">All tickets</option>
             <option value="received">Received</option>
             <option value="sent">Sent</option>
+            <option value="mine">My Tickets</option>
           </select>
         )}
 
@@ -129,6 +138,7 @@ export default function TicketListPage() {
                 <th>Description</th>
                 <th>Created By</th>
                 <th>Department</th>
+                <th>Picked By</th>
                 <th>Status</th>
                 <th>Date</th>
                 <th className="text-center">💬</th>
@@ -150,11 +160,20 @@ export default function TicketListPage() {
                   <td>
                     <div className="text-sm font-medium">{t.createdBy.fullName}</div>
                     <div className="text-xs text-brand-gray-light">
-                      {t.createdBy.role === "ADMIN" ? "Admin" : t.createdBy.profile}
+                      {t.createdBy.role === "ADMIN"
+                        ? `Admin — ${t.createdBy.department?.name ?? ""}`
+                        : t.createdBy.profile}
                     </div>
                   </td>
                   <td>
                     <span className="badge badge-role">{t.assignedDepartment.name}</span>
+                  </td>
+                  <td>
+                    {t.assignedTo ? (
+                      <span className="text-sm font-medium">{t.assignedTo.fullName}</span>
+                    ) : (
+                      <span className="text-xs text-brand-gray-light italic">—</span>
+                    )}
                   </td>
                   <td>
                     <span className={`badge ${STATUS_BADGE[t.status] ?? ""}`}>

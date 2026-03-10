@@ -13,11 +13,19 @@ type Category = {
   ownerDepartment: { id: string; name: string; code: string };
 };
 
+type Department = {
+  id: string;
+  name: string;
+  code: string;
+};
+
 export default function NewTicketPage() {
   const router = useRouter();
   const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "ADMIN";
 
   const [categories, setCategories] = useState<Category[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -25,18 +33,29 @@ export default function NewTicketPage() {
   const [categoryId, setCategoryId] = useState("");
   const [subtype, setSubtype] = useState("");
   const [description, setDescription] = useState("");
+  const [targetDeptId, setTargetDeptId] = useState("");
 
   const selectedCategory = categories.find((c) => c.id === categoryId);
 
+  // When admin selects a category, auto-fill from category default
   useEffect(() => {
-    fetch("/api/categories")
-      .then((r) => r.json())
-      .then((cats: Category[]) => {
+    if (isAdmin && selectedCategory) {
+      setTargetDeptId(selectedCategory.ownerDepartment.id);
+    }
+  }, [categoryId, isAdmin, selectedCategory]);
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/categories").then((r) => r.json()),
+      isAdmin ? fetch("/api/departments").then((r) => r.json()) : Promise.resolve([]),
+    ])
+      .then(([cats, depts]: [Category[], Department[]]) => {
         setCategories(cats);
+        setDepartments(depts);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [isAdmin]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -64,6 +83,7 @@ export default function NewTicketPage() {
         categoryId,
         subtype: subtype || undefined,
         description,
+        ...(isAdmin && targetDeptId ? { assignedDepartmentId: targetDeptId } : {}),
       }),
     });
 
@@ -127,12 +147,37 @@ export default function NewTicketPage() {
                   </option>
                 ))}
             </select>
-            {selectedCategory && (
+            {selectedCategory && !isAdmin && (
               <p className="form-hint mt-1">
                 Will be sent to: <strong>{selectedCategory.ownerDepartment.name}</strong>
               </p>
             )}
           </div>
+
+          {/* Target Department (admin only) */}
+          {isAdmin && (
+            <div>
+              <label className="form-label">Send to Department *</label>
+              <select
+                className="form-select"
+                value={targetDeptId}
+                onChange={(e) => setTargetDeptId(e.target.value)}
+                required
+              >
+                <option value="">— Select a department —</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.code})
+                  </option>
+                ))}
+              </select>
+              {selectedCategory && targetDeptId !== selectedCategory.ownerDepartment.id && (
+                <p className="form-hint mt-1 text-amber-600">
+                  Note: default for this category is {selectedCategory.ownerDepartment.name}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Subtype */}
           <div>

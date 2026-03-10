@@ -21,12 +21,15 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Ticket not found." }, { status: 404 });
   }
 
-  // Access check: creator or admin of assigned department
+  // Access check: creator or the admin who picked this ticket
   const isCreator = ticket.createdById === user.id;
-  const isAssignedAdmin = isAdmin(user) && ticket.assignedDepartmentId === user.departmentId;
+  const isPickedAdmin = isAdmin(user) && ticket.assignedToId === user.id;
 
-  if (!isCreator && !isAssignedAdmin) {
-    return NextResponse.json({ error: "Access denied." }, { status: 403 });
+  if (!isCreator && !isPickedAdmin) {
+    return NextResponse.json(
+      { error: "Only the ticket creator or the admin who picked this ticket can comment." },
+      { status: 403 }
+    );
   }
 
   const body = await request.json();

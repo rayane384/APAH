@@ -17,23 +17,26 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const status = searchParams.get("status");
   const sort = searchParams.get("sort") ?? "newest";
-  const direction = searchParams.get("direction"); // "sent" | "received" | null
+  const direction = searchParams.get("direction"); // "sent" | "received" | "mine" | null
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = {};
 
   if (isAdmin(user)) {
     if (direction === "sent") {
-      // Only tickets the admin created
-      where.createdById = user.id;
+      // Tickets sent by any admin in this department
+      where.createdBy = { departmentId: user.departmentId, role: "ADMIN" };
     } else if (direction === "received") {
-      // Only tickets assigned to the admin's department
+      // Tickets assigned to the admin's department
       where.assignedDepartmentId = user.departmentId;
+    } else if (direction === "mine") {
+      // Tickets personally picked by this admin
+      where.assignedToId = user.id;
     } else {
-      // All: assigned to department OR created by admin
+      // All: assigned to department OR sent by any admin in department
       where.OR = [
         { assignedDepartmentId: user.departmentId },
-        { createdById: user.id },
+        { createdBy: { departmentId: user.departmentId, role: "ADMIN" } },
       ];
     }
   } else {
@@ -52,8 +55,14 @@ export async function GET(request: NextRequest) {
     where,
     include: {
       category: { select: { id: true, name: true, code: true, isReservation: true, isOther: true } },
-      createdBy: { select: { id: true, fullName: true, email: true, role: true, profile: true } },
+      createdBy: {
+        select: {
+          id: true, fullName: true, email: true, role: true, profile: true,
+          department: { select: { id: true, name: true, code: true } },
+        },
+      },
       assignedDepartment: { select: { id: true, name: true, code: true } },
+      assignedTo: { select: { id: true, fullName: true, email: true } },
       _count: { select: { comments: true } },
     },
     orderBy,
@@ -73,10 +82,11 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { categoryId, subtype, description } = body as {
+  const { categoryId, subtype, description, assignedDepartmentId: targetDeptId } = body as {
     categoryId: string;
     subtype?: string;
     description: string;
+    assignedDepartmentId?: string;
   };
 
   if (!categoryId || !description?.trim()) {
@@ -104,8 +114,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Department is always determined by the category
-  const assignedDepartmentId = category.ownerDepartmentId;
+  // Admins can manually select a target department; non-admins always use category default
+  let assignedDepartmentId = category.ownerDepartmentId;
+  if (targetDeptId && isAdmin(user)) {
+    const dept = await prisma.department.findUnique({ where: { id: targetDeptId } });
+    if (!dept) {
+      return NextResponse.json({ error: "Target department not found." }, { status: 404 });
+    }
+    assignedDepartmentId = dept.id;
+  }
 
   // Create the ticket
   const ticket = await prisma.ticket.create({
