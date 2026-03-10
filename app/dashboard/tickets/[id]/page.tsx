@@ -246,8 +246,9 @@ export default function TicketDetailPage() {
   // Allowed next statuses based on workflow
   const allowedNext = ticket ? (VALID_TRANSITIONS[ticket.status] ?? []) : [];
 
-  // Can this user comment? Creator or picked admin
-  const canComment = isCreator || isPickedByMe;
+  // Can this user comment? Creator or picked admin, but not on terminal statuses
+  const isTerminal = ticket?.status === "RESOLVED" || ticket?.status === "DECLINED";
+  const canComment = !isTerminal && (isCreator || isPickedByMe);
 
   if (loading) {
     return (
@@ -325,7 +326,7 @@ export default function TicketDetailPage() {
                     {picking ? "Picking…" : "📋 Pick this Ticket"}
                   </button>
                 )}
-                {isPickedByMe && (
+                {isPickedByMe && ticket.status !== "RESOLVED" && ticket.status !== "DECLINED" && (
                   <button
                     className="btn btn-outline btn-sm"
                     onClick={handleUnpick}
@@ -340,8 +341,8 @@ export default function TicketDetailPage() {
                   </span>
                 )}
 
-                {/* Triage route button */}
-                {isTriage && !isAlreadyRouted && (
+                {/* Triage route button — only after picking */}
+                {isTriage && isPickedByMe && !isAlreadyRouted && (
                   <button
                     className="btn btn-secondary btn-sm"
                     onClick={() => setShowRouteForm(!showRouteForm)}
@@ -352,13 +353,7 @@ export default function TicketDetailPage() {
                 {isTriage && isAlreadyRouted && (
                   <span className="text-sm text-brand-gray-light flex items-center gap-1">
                     ✅ Routed to{" "}
-                    <Link
-                      href={`/dashboard/tickets/${ticket.routedTo!.id}`}
-                      className="font-semibold underline"
-                      style={{ color: "var(--brand-primary)" }}
-                    >
-                      {ticket.routedTo!.assignedDepartment.name}
-                    </Link>
+                    <span className="font-semibold">{ticket.routedTo!.assignedDepartment.name}</span>
                   </span>
                 )}
               </div>
@@ -555,9 +550,11 @@ export default function TicketDetailPage() {
             ) : (
               <div className="border-t border-border pt-4 mt-4">
                 <p className="text-sm text-brand-gray-light">
-                  {isAdmin && isDeptAdmin && !isPickedByMe
-                    ? "Pick this ticket to comment and update status."
-                    : "Only the ticket creator or the assigned admin can comment."}
+                  {isTerminal
+                    ? "This ticket is closed. No further comments can be added."
+                    : isAdmin && isDeptAdmin && !isPickedByMe
+                      ? "Pick this ticket to comment and update status."
+                      : "Only the ticket creator or the assigned admin can comment."}
                 </p>
               </div>
             )}
@@ -588,13 +585,9 @@ export default function TicketDetailPage() {
                 <>
                   <dt>Routed To</dt>
                   <dd>
-                    <Link
-                      href={`/dashboard/tickets/${ticket.routedTo.id}`}
-                      className="badge badge-role"
-                      style={{ textDecoration: "none" }}
-                    >
-                      {ticket.routedTo.assignedDepartment.name} ↗
-                    </Link>
+                    <span className="badge badge-role">
+                      {ticket.routedTo.assignedDepartment.name}
+                    </span>
                   </dd>
                 </>
               )}
@@ -603,13 +596,9 @@ export default function TicketDetailPage() {
                 <>
                   <dt>Routed From</dt>
                   <dd>
-                    <Link
-                      href={`/dashboard/tickets/${ticket.routedFrom.id}`}
-                      className="badge badge-role"
-                      style={{ textDecoration: "none" }}
-                    >
-                      {ticket.routedFrom.assignedDepartment.name} ↗
-                    </Link>
+                    <span className="badge badge-role">
+                      {ticket.routedFrom.assignedDepartment.name}
+                    </span>
                   </dd>
                 </>
               )}

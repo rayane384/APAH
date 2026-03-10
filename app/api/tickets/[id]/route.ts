@@ -130,19 +130,33 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         { status: 409 }
       );
     }
+    // Auto-advance status: NEW → IN_PROGRESS on pick; keep IN_PROGRESS if re-picked
+    const newStatus = ticket.status === "NEW" ? "IN_PROGRESS" : ticket.status;
+    const historyEntries = [
+      prisma.ticketHistory.create({
+        data: { ticketId: id, action: "PICKED", performedById: user.id },
+      }),
+    ];
+    if (newStatus !== ticket.status) {
+      historyEntries.push(
+        prisma.ticketHistory.create({
+          data: {
+            ticketId: id,
+            action: "STATUS_CHANGED",
+            performedById: user.id,
+            oldStatus: ticket.status,
+            newStatus,
+          },
+        })
+      );
+    }
     const [updated] = await prisma.$transaction([
       prisma.ticket.update({
         where: { id },
-        data: { assignedToId: user.id },
+        data: { assignedToId: user.id, status: newStatus as never },
         include: ticketInclude,
       }),
-      prisma.ticketHistory.create({
-        data: {
-          ticketId: id,
-          action: "PICKED",
-          performedById: user.id,
-        },
-      }),
+      ...historyEntries,
     ]);
     return NextResponse.json(updated);
   }
@@ -153,6 +167,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return NextResponse.json(
         { error: "You can only release tickets you picked." },
         { status: 403 }
+      );
+    }
+    // Cannot unpick a ticket that is already resolved or declined
+    if (ticket.status === "RESOLVED" || ticket.status === "DECLINED") {
+      return NextResponse.json(
+        { error: "Cannot release a ticket that is already resolved or declined." },
+        { status: 400 }
       );
     }
     const [updated] = await prisma.$transaction([
@@ -221,27 +242,27 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         },
       });
 
-      // 2. Link original → clone
+      // 2. Link original → clone and auto-resolve the triage ticket
       await tx.ticket.update({
         where: { id },
-        data: { routedToId: clone.id },
+        data: { routedToId: clone.id, status: "RESOLVED" },
       });
 
-      // 3. Record ROUTED history on the original ticket (triage's copy)
+      // Record auto-status change on triage ticket
       await tx.ticketHistory.create({
         data: {
           ticketId: id,
-          action: "ROUTED",
+          action: "STATUS_CHANGED",
           performedById: user.id,
-          fromDepartmentId: fromDeptId,
-          toDepartmentId: targetDept.id,
+          oldStatus: ticket.status,
+          newStatus: "RESOLVED",
         },
       });
 
-      // 4. Record ROUTED history on the cloned ticket (target dept sees it)
+      // 3. Record ROUTED history on the original ticket only (triage's copy)
       await tx.ticketHistory.create({
         data: {
-          ticketId: clone.id,
+          ticketId: id,
           action: "ROUTED",
           performedById: user.id,
           fromDepartmentId: fromDeptId,

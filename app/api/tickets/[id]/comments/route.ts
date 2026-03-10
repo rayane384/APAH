@@ -21,6 +21,14 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Ticket not found." }, { status: 404 });
   }
 
+  // Block comments on terminal statuses
+  if (ticket.status === "RESOLVED" || ticket.status === "DECLINED") {
+    return NextResponse.json(
+      { error: "Cannot add comments to a resolved or declined ticket." },
+      { status: 400 }
+    );
+  }
+
   // Access check: creator or the admin who picked this ticket
   const isCreator = ticket.createdById === user.id;
   const isPickedAdmin = isAdmin(user) && ticket.assignedToId === user.id;
