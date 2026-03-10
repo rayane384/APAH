@@ -19,6 +19,17 @@ type Comment = {
 
 type Department = { id: string; name: string; code: string };
 
+type HistoryEntry = {
+  id: string;
+  action: "PICKED" | "UNPICKED" | "ROUTED" | "STATUS_CHANGED";
+  performedBy: { id: string; fullName: string };
+  oldStatus: string | null;
+  newStatus: string | null;
+  fromDepartmentId: string | null;
+  toDepartmentId: string | null;
+  createdAt: string;
+};
+
 type Ticket = {
   id: string;
   subtype: string | null;
@@ -39,6 +50,8 @@ type Ticket = {
   };
   assignedDepartment: { id: string; name: string; code: string };
   assignedTo: { id: string; fullName: string; email: string } | null;
+  routedTo: { id: string; assignedDepartment: { id: string; name: string; code: string } } | null;
+  routedFrom: { id: string; assignedDepartment: { id: string; name: string; code: string } } | null;
   comments: Comment[];
   reservationRequest: null;
 };
@@ -50,7 +63,23 @@ const STATUS_BADGE: Record<string, string> = {
   DECLINED: "badge-declined",
 };
 
-const STATUS_OPTIONS = ["NEW", "IN_PROGRESS", "RESOLVED", "DECLINED"];
+/* Status workflow: valid transitions (mirrors API) */
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  NEW: ["IN_PROGRESS"],
+  IN_PROGRESS: ["RESOLVED", "DECLINED"],
+  RESOLVED: [],
+  DECLINED: [],
+};
+
+const ALL_STATUSES = ["NEW", "IN_PROGRESS", "RESOLVED", "DECLINED"];
+
+/* History action labels & icons */
+const HISTORY_META: Record<string, { icon: string; label: string }> = {
+  PICKED: { icon: "📋", label: "Picked" },
+  UNPICKED: { icon: "↩️", label: "Released" },
+  ROUTED: { icon: "🔀", label: "Routed" },
+  STATUS_CHANGED: { icon: "🔄", label: "Status changed" },
+};
 
 export default function TicketDetailPage() {
   const { id } = useParams() as { id: string };
@@ -60,6 +89,7 @@ export default function TicketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   const [commentBody, setCommentBody] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
@@ -78,6 +108,7 @@ export default function TicketDetailPage() {
   const isCreator = ticket?.createdBy?.id === user?.id;
   const isTriage =
     isDeptAdmin && ticket?.assignedDepartment?.code === "TRIAGE";
+  const isAlreadyRouted = !!ticket?.routedTo;
 
   useEffect(() => {
     fetchTicket();
@@ -89,6 +120,27 @@ export default function TicketDetailPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Fetch history when ticket loads (only for receivers)
+  useEffect(() => {
+    if (ticket && isAdmin) {
+      fetchHistory();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticket?.id, ticket?.status, ticket?.assignedTo?.id, ticket?.routedTo?.id]);
+
+  async function fetchHistory() {
+    try {
+      const r = await fetch(`/api/tickets/${id}/history`);
+      if (r.ok) {
+        setHistory(await r.json());
+      } else {
+        setHistory([]);
+      }
+    } catch {
+      setHistory([]);
+    }
+  }
 
   async function fetchTicket() {
     setLoading(true);
@@ -143,6 +195,11 @@ export default function TicketDetailPage() {
       setTicket(await res.json());
       setShowRouteForm(false);
       setRouteDeptId("");
+      // Re-fetch history to show the new ROUTED entry
+      await fetchHistory();
+    } else {
+      const data = await res.json();
+      setError(data.error ?? "Failed to route ticket.");
     }
     setRouting(false);
   }
@@ -157,6 +214,9 @@ export default function TicketDetailPage() {
     });
     if (res.ok) {
       setTicket(await res.json());
+    } else {
+      const data = await res.json();
+      setError(data.error ?? "Status update failed.");
     }
     setUpdatingStatus(false);
   }
@@ -177,6 +237,15 @@ export default function TicketDetailPage() {
     setSubmittingComment(false);
   }
 
+  /** Helper: get department name by id */
+  function deptName(deptId: string | null) {
+    if (!deptId) return "Unknown";
+    return departments.find((d) => d.id === deptId)?.name ?? deptId.slice(-6);
+  }
+
+  // Allowed next statuses based on workflow
+  const allowedNext = ticket ? (VALID_TRANSITIONS[ticket.status] ?? []) : [];
+
   // Can this user comment? Creator or picked admin
   const canComment = isCreator || isPickedByMe;
 
@@ -188,7 +257,7 @@ export default function TicketDetailPage() {
     );
   }
 
-  if (error || !ticket) {
+  if (error && !ticket) {
     return (
       <div>
         <div className="alert alert-error">
@@ -201,8 +270,18 @@ export default function TicketDetailPage() {
     );
   }
 
+  if (!ticket) return null;
+
   return (
     <div>
+      {/* Error banner (dismissable) */}
+      {error && (
+        <div className="alert alert-error mb-4 flex items-center justify-between">
+          <span>{error}</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => setError("")}>✕</button>
+        </div>
+      )}
+
       {/* Breadcrumb + title */}
       <Link href="/dashboard/tickets" className="btn btn-ghost btn-sm mb-3 -ml-2">
         ← Back to Tickets
@@ -262,20 +341,30 @@ export default function TicketDetailPage() {
                 )}
 
                 {/* Triage route button */}
-                {isTriage && (
-                  <>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setShowRouteForm(!showRouteForm)}
+                {isTriage && !isAlreadyRouted && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setShowRouteForm(!showRouteForm)}
+                  >
+                    🔀 Route to Department
+                  </button>
+                )}
+                {isTriage && isAlreadyRouted && (
+                  <span className="text-sm text-brand-gray-light flex items-center gap-1">
+                    ✅ Routed to{" "}
+                    <Link
+                      href={`/dashboard/tickets/${ticket.routedTo!.id}`}
+                      className="font-semibold underline"
+                      style={{ color: "var(--brand-primary)" }}
                     >
-                      🔀 Route to Department
-                    </button>
-                  </>
+                      {ticket.routedTo!.assignedDepartment.name}
+                    </Link>
+                  </span>
                 )}
               </div>
 
               {/* Route form */}
-              {showRouteForm && (
+              {showRouteForm && !isAlreadyRouted && (
                 <div className="mt-3 flex items-center gap-2">
                   <select
                     className="form-select"
@@ -304,32 +393,102 @@ export default function TicketDetailPage() {
             </div>
           )}
 
-          {/* Status update — only for picked admin */}
+          {/* Status update — only for picked admin, with workflow enforcement */}
           {isPickedByMe && (
             <div className="card">
               <h3 className="text-sm font-semibold text-brand-gray-light uppercase tracking-wide mb-3">Update Status</h3>
-              <div className="flex flex-wrap gap-2">
-                {STATUS_OPTIONS.map((s) => (
-                  <button
-                    key={s}
-                    className={`btn btn-sm ${
-                      ticket.status === s
-                        ? "btn-primary"
-                        : "btn-outline"
-                    }`}
-                    disabled={ticket.status === s || updatingStatus}
-                    onClick={() => handleStatusChange(s)}
-                  >
-                    {s.replace("_", " ")}
-                  </button>
-                ))}
-              </div>
+              {allowedNext.length === 0 ? (
+                <p className="text-sm text-brand-gray-light">
+                  This ticket is in a terminal state ({ticket.status.replace("_", " ")}). No further status changes are possible.
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-brand-gray-light mb-3">
+                    Workflow: NEW → IN PROGRESS → RESOLVED / DECLINED
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {ALL_STATUSES.map((s) => {
+                      const isCurrent = ticket.status === s;
+                      const isAllowed = allowedNext.includes(s);
+                      return (
+                        <button
+                          key={s}
+                          className={`btn btn-sm ${
+                            isCurrent
+                              ? "btn-primary"
+                              : isAllowed
+                                ? "btn-outline"
+                                : "btn-outline opacity-40 cursor-not-allowed"
+                          }`}
+                          disabled={isCurrent || !isAllowed || updatingStatus}
+                          onClick={() => isAllowed && handleStatusChange(s)}
+                          title={
+                            isCurrent
+                              ? "Current status"
+                              : isAllowed
+                                ? `Change to ${s.replace("_", " ")}`
+                                : "Not available in current workflow step"
+                          }
+                        >
+                          {s.replace("_", " ")}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
               {ticket.priority && (
                 <p className="form-hint mt-3">
                   AI Priority: <strong>{ticket.priority}</strong>
                   {ticket.aiReason && <> — {ticket.aiReason}</>}
                 </p>
               )}
+            </div>
+          )}
+
+          {/* Ticket History — visible whenever history data is loaded (API handles access control) */}
+          {history.length > 0 && (
+            <div className="card">
+              <h3 className="text-sm font-semibold text-brand-gray-light uppercase tracking-wide mb-4">
+                Activity History
+              </h3>
+              <div className="relative pl-6 space-y-4">
+                {/* Vertical line */}
+                <div
+                  className="absolute left-2 top-1 bottom-1 w-px"
+                  style={{ background: "var(--border)" }}
+                />
+                {history.map((h) => {
+                  const meta = HISTORY_META[h.action] ?? { icon: "•", label: h.action };
+                  let detail = "";
+                  if (h.action === "STATUS_CHANGED") {
+                    detail = `${(h.oldStatus ?? "").replace("_", " ")} → ${(h.newStatus ?? "").replace("_", " ")}`;
+                  } else if (h.action === "ROUTED") {
+                    detail = `${deptName(h.fromDepartmentId)} → ${deptName(h.toDepartmentId)}`;
+                  }
+                  return (
+                    <div key={h.id} className="relative flex gap-3 items-start">
+                      <span
+                        className="absolute -left-4 flex items-center justify-center w-5 h-5 rounded-full text-xs"
+                        style={{ background: "var(--card-bg)", border: "1px solid var(--border)" }}
+                      >
+                        {meta.icon}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium">{meta.label}</span>
+                          {detail && (
+                            <span className="text-xs text-brand-gray-light">({detail})</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-brand-gray-light">
+                          by <strong>{h.performedBy.fullName}</strong> — {new Date(h.createdAt).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -424,6 +583,36 @@ export default function TicketDetailPage() {
               <dd>
                 <span className="badge badge-role">{ticket.assignedDepartment.name}</span>
               </dd>
+
+              {ticket.routedTo && (
+                <>
+                  <dt>Routed To</dt>
+                  <dd>
+                    <Link
+                      href={`/dashboard/tickets/${ticket.routedTo.id}`}
+                      className="badge badge-role"
+                      style={{ textDecoration: "none" }}
+                    >
+                      {ticket.routedTo.assignedDepartment.name} ↗
+                    </Link>
+                  </dd>
+                </>
+              )}
+
+              {ticket.routedFrom && (
+                <>
+                  <dt>Routed From</dt>
+                  <dd>
+                    <Link
+                      href={`/dashboard/tickets/${ticket.routedFrom.id}`}
+                      className="badge badge-role"
+                      style={{ textDecoration: "none" }}
+                    >
+                      {ticket.routedFrom.assignedDepartment.name} ↗
+                    </Link>
+                  </dd>
+                </>
+              )}
 
               <dt>Picked By</dt>
               <dd>

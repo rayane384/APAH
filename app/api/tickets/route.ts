@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       // Tickets personally picked by this admin
       where.assignedToId = user.id;
     } else {
-      // All: assigned to department OR sent by any admin in department
+      // All: assigned to department OR sent by dept admins
       where.OR = [
         { assignedDepartmentId: user.departmentId },
         { createdBy: { departmentId: user.departmentId, role: "ADMIN" } },

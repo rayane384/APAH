@@ -22,6 +22,12 @@ const ticketInclude = {
   assignedTo: {
     select: { id: true, fullName: true, email: true },
   },
+  routedTo: {
+    select: { id: true, assignedDepartment: { select: { id: true, name: true, code: true } } },
+  },
+  routedFrom: {
+    select: { id: true, assignedDepartment: { select: { id: true, name: true, code: true } } },
+  },
   comments: {
     include: {
       author: {
@@ -36,6 +42,14 @@ const ticketInclude = {
     orderBy: { createdAt: "asc" as const },
   },
   reservationRequest: true,
+};
+
+/* ── Status workflow: valid transitions ──────────────────── */
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  NEW: ["IN_PROGRESS"],
+  IN_PROGRESS: ["RESOLVED", "DECLINED"],
+  RESOLVED: [],
+  DECLINED: [],
 };
 
 /**
@@ -102,7 +116,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     departmentId?: string;
   };
 
-  // ── Pick / Unpick ──────────────────────────────────────────
+  // ── Pick ───────────────────────────────────────────────────
   if (action === "pick") {
     if (ticket.assignedDepartmentId !== user.departmentId) {
       return NextResponse.json(
@@ -116,14 +130,24 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         { status: 409 }
       );
     }
-    const updated = await prisma.ticket.update({
-      where: { id },
-      data: { assignedToId: user.id },
-      include: ticketInclude,
-    });
+    const [updated] = await prisma.$transaction([
+      prisma.ticket.update({
+        where: { id },
+        data: { assignedToId: user.id },
+        include: ticketInclude,
+      }),
+      prisma.ticketHistory.create({
+        data: {
+          ticketId: id,
+          action: "PICKED",
+          performedById: user.id,
+        },
+      }),
+    ]);
     return NextResponse.json(updated);
   }
 
+  // ── Unpick ─────────────────────────────────────────────────
   if (action === "unpick") {
     if (ticket.assignedToId !== user.id) {
       return NextResponse.json(
@@ -131,20 +155,37 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         { status: 403 }
       );
     }
-    const updated = await prisma.ticket.update({
-      where: { id },
-      data: { assignedToId: null },
-      include: ticketInclude,
-    });
+    const [updated] = await prisma.$transaction([
+      prisma.ticket.update({
+        where: { id },
+        data: { assignedToId: null },
+        include: ticketInclude,
+      }),
+      prisma.ticketHistory.create({
+        data: {
+          ticketId: id,
+          action: "UNPICKED",
+          performedById: user.id,
+        },
+      }),
+    ]);
     return NextResponse.json(updated);
   }
 
   // ── Route (triage) ────────────────────────────────────────
+  // Clone approach: original ticket stays untouched in triage,
+  // a new ticket is created for the target department.
   if (action === "route") {
     if (ticket.assignedDepartmentId !== user.departmentId) {
       return NextResponse.json(
         { error: "You can only route tickets assigned to your department." },
         { status: 403 }
+      );
+    }
+    if (ticket.routedToId) {
+      return NextResponse.json(
+        { error: "This ticket has already been routed." },
+        { status: 409 }
       );
     }
     if (!departmentId) {
@@ -162,13 +203,58 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         { status: 404 }
       );
     }
-    const updated = await prisma.ticket.update({
+    const fromDeptId = ticket.assignedDepartmentId;
+
+    // Create clone for target dept + link original → clone + record history on both
+    const [clonedTicket] = await prisma.$transaction(async (tx) => {
+      // 1. Create the cloned ticket for the target department
+      const clone = await tx.ticket.create({
+        data: {
+          categoryId: ticket.categoryId,
+          subtype: ticket.subtype,
+          description: ticket.description,
+          createdById: ticket.createdById,
+          assignedDepartmentId: targetDept.id,
+          status: "NEW",
+          priority: ticket.priority,
+          aiReason: ticket.aiReason,
+        },
+      });
+
+      // 2. Link original → clone
+      await tx.ticket.update({
+        where: { id },
+        data: { routedToId: clone.id },
+      });
+
+      // 3. Record ROUTED history on the original ticket (triage's copy)
+      await tx.ticketHistory.create({
+        data: {
+          ticketId: id,
+          action: "ROUTED",
+          performedById: user.id,
+          fromDepartmentId: fromDeptId,
+          toDepartmentId: targetDept.id,
+        },
+      });
+
+      // 4. Record ROUTED history on the cloned ticket (target dept sees it)
+      await tx.ticketHistory.create({
+        data: {
+          ticketId: clone.id,
+          action: "ROUTED",
+          performedById: user.id,
+          fromDepartmentId: fromDeptId,
+          toDepartmentId: targetDept.id,
+        },
+      });
+
+      return [clone];
+    });
+
+    // Return the updated original ticket (with routedTo link)
+    const updated = await prisma.ticket.findUnique({
       where: { id },
-      data: {
-        assignedDepartmentId: targetDept.id,
-        assignedToId: null, // clear pick when routing
-        status: "NEW", // reset status for the new department
-      },
       include: ticketInclude,
     });
     return NextResponse.json(updated);
@@ -191,11 +277,35 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       );
     }
 
-    const updated = await prisma.ticket.update({
-      where: { id },
-      data: { status: status as never },
-      include: ticketInclude,
-    });
+    // Enforce status workflow transitions
+    const allowed = VALID_TRANSITIONS[ticket.status] ?? [];
+    if (!allowed.includes(status)) {
+      return NextResponse.json(
+        {
+          error: `Cannot change status from ${ticket.status} to ${status}. Allowed: ${
+            allowed.length ? allowed.join(", ") : "none (terminal state)"
+          }`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const [updated] = await prisma.$transaction([
+      prisma.ticket.update({
+        where: { id },
+        data: { status: status as never },
+        include: ticketInclude,
+      }),
+      prisma.ticketHistory.create({
+        data: {
+          ticketId: id,
+          action: "STATUS_CHANGED",
+          performedById: user.id,
+          oldStatus: ticket.status,
+          newStatus: status,
+        },
+      }),
+    ]);
     return NextResponse.json(updated);
   }
 

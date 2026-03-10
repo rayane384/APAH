@@ -40,6 +40,13 @@ enum TicketPriority {
   HIGH
 }
 
+enum TicketHistoryAction {
+  PICKED
+  UNPICKED
+  ROUTED
+  STATUS_CHANGED
+}
+
 enum ReservationRequestStatus {
   PENDING
   ACCEPTED
@@ -95,6 +102,7 @@ model User {
   createdTickets Ticket[] @relation("TicketCreatedBy")
   assignedTickets Ticket[] @relation("TicketAssignedTo")
   ticketComments TicketComment[]
+  ticketHistory  TicketHistory[]
 
   // opposite for ReservationRequest.processedBy
   processedReservationRequests ReservationRequest[] @relation("ReservationRequestProcessedBy")
@@ -180,6 +188,12 @@ model Ticket {
   assignedTo   User? @relation("TicketAssignedTo", fields: [assignedToId], references: [id])
 
   comments      TicketComment[]
+  history       TicketHistory[]
+
+  // Routing: when triage routes, original stays, a clone is created for target dept
+  routedToId    String?  @unique
+  routedTo      Ticket?  @relation("TicketRoutedTo", fields: [routedToId], references: [id])
+  routedFrom    Ticket?  @relation("TicketRoutedTo")
 
   reservationRequest ReservationRequest?
 
@@ -208,6 +222,31 @@ model TicketComment {
 
   @@index([ticketId])
   @@index([authorId])
+}
+
+model TicketHistory {
+  id        String @id @default(cuid())
+
+  ticketId  String
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  action    TicketHistoryAction
+
+  performedById String
+  performedBy   User @relation(fields: [performedById], references: [id])
+
+  // For STATUS_CHANGED
+  oldStatus String?
+  newStatus String?
+
+  // For ROUTED
+  fromDepartmentId String?
+  toDepartmentId   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([performedById])
 }
 
 model Campus {
