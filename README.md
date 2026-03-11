@@ -2,33 +2,6 @@
 
 A Next.js internal ticket system for campus departments. Admins manage and route tickets; non-admin users (professors, delegates, club presidents) submit them.
 
----
-
-## Table of Contents
-
-- [Tech Stack](#tech-stack)
-- [For the Project Owner (Before Pushing)](#for-the-project-owner-before-pushing)
-- [For Collaborators — Getting Started](#for-collaborators--getting-started)
-  - [Prerequisites](#prerequisites)
-  - [1. Clone the Repository](#1-clone-the-repository)
-  - [2. Install Dependencies](#2-install-dependencies)
-  - [3. Set Up the Database](#3-set-up-the-database)
-  - [4. Configure Environment Variables](#4-configure-environment-variables)
-  - [5. Run Migrations and Generate Prisma Client](#5-run-migrations-and-generate-prisma-client)
-  - [6. Seed the Database](#6-seed-the-database)
-  - [7. Start the Dev Server](#7-start-the-dev-server)
-- [Git & GitHub Crash Course](#git--github-crash-course)
-  - [One-Time Setup](#one-time-setup)
-  - [Daily Workflow](#daily-workflow)
-  - [Branches](#branches)
-  - [Pull Requests](#pull-requests)
-  - [Resolving Merge Conflicts](#resolving-merge-conflicts)
-  - [Common Git Commands Cheat Sheet](#common-git-commands-cheat-sheet)
-- [Project Structure Overview](#project-structure-overview)
-- [Test Accounts (from seed)](#test-accounts-from-seed)
-- [API Conventions](#api-conventions)
-
----
 
 ## Tech Stack
 
