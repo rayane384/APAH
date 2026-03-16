@@ -266,7 +266,68 @@ async function main() {
     console.log(`  Category: ${cat.code}`);
   }
 
-  console.log("\nSeeding complete.");
+  // ── 4. Campuses ─────────────────────────────────────────────────
+  const campuses = [
+    { name: "Campus Central", code: "CAMPUS_A" },
+    { name: "Campus Nord", code: "CAMPUS_B" },
+  ];
+
+  const campusMap: Record<string, any> = {};
+  for (const c of campuses) {
+    campusMap[c.code] = await prisma.campus.upsert({
+      where: { code: c.code },
+      update: { name: c.name },
+      create: { name: c.name, code: c.code },
+    });
+    console.log(`  Campus: ${c.code}`);
+  }
+
+  // ── 5. Room Types ───────────────────────────────────────────────
+  const roomTypes = [
+    { name: "Lecture Hall", code: "LECTURE" },
+    { name: "Lab", code: "LAB" },
+    { name: "Meeting Room", code: "MEETING" },
+  ];
+
+  const roomTypeMap: Record<string, any> = {};
+  for (const rt of roomTypes) {
+    roomTypeMap[rt.code] = await prisma.roomType.upsert({
+      where: { code: rt.code },
+      update: { name: rt.name },
+      create: { name: rt.name, code: rt.code },
+    });
+    console.log(`  RoomType: ${rt.code}`);
+  }
+
+  // ── 6. Rooms ────────────────────────────────────────────────────
+  const rooms = [
+    { name: "Amphi A1", code: "A1", campusCode: "CAMPUS_A", typeCode: "LECTURE", capacity: 120 },
+    { name: "Amphi A2", code: "A2", campusCode: "CAMPUS_A", typeCode: "LECTURE", capacity: 80 },
+    { name: "Lab A1", code: "LAB_A1", campusCode: "CAMPUS_A", typeCode: "LAB", capacity: 30 },
+    { name: "Meeting Room A1", code: "MEET_A1", campusCode: "CAMPUS_A", typeCode: "MEETING", capacity: 15 },
+    { name: "Amphi B1", code: "B1", campusCode: "CAMPUS_B", typeCode: "LECTURE", capacity: 100 },
+    { name: "Lab B1", code: "LAB_B1", campusCode: "CAMPUS_B", typeCode: "LAB", capacity: 25 },
+  ];
+
+  for (const r of rooms) {
+    await prisma.room.upsert({
+      where: { code: r.code },
+      update: {
+        name: r.name,
+        campusId: campusMap[r.campusCode].id,
+        roomTypeId: roomTypeMap[r.typeCode].id,
+        capacity: r.capacity,
+      },
+      create: {
+        name: r.name,
+        code: r.code,
+        campusId: campusMap[r.campusCode].id,
+        roomTypeId: roomTypeMap[r.typeCode].id,
+        capacity: r.capacity,
+      },
+    });
+    console.log(`  Room: ${r.code}`);
+  }
 }
 
 main()

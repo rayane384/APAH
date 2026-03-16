@@ -41,7 +41,18 @@ const ticketInclude = {
     },
     orderBy: { createdAt: "asc" as const },
   },
-  reservationRequest: true,
+  reservationRequest: {
+    include: {
+      room: {
+        include: {
+          campus: { select: { id: true, name: true, code: true } },
+          roomType: { select: { id: true, name: true, code: true } },
+        },
+      },
+      campus: { select: { id: true, name: true, code: true } },
+      approvedReservation: true,
+    },
+  },
 };
 
 /* ── Status workflow: valid transitions ──────────────────── */
