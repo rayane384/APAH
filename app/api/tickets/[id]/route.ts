@@ -53,6 +53,9 @@ const ticketInclude = {
       approvedReservation: true,
     },
   },
+  attachments: {
+    orderBy: { createdAt: "asc" as const },
+  },
 };
 
 /* ── Status workflow: valid transitions ──────────────────── */

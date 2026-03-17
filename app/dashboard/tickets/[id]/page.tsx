@@ -90,6 +90,15 @@ type Conflict = {
   adminCanAdjust: boolean;
 };
 
+type Attachment = {
+  id: string;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  mimeType: string;
+  createdAt: string;
+};
+
 type Ticket = {
   id: string;
   subtype: string | null;
@@ -113,8 +122,23 @@ type Ticket = {
   routedTo: { id: string; assignedDepartment: { id: string; name: string; code: string } } | null;
   routedFrom: { id: string; assignedDepartment: { id: string; name: string; code: string } } | null;
   comments: Comment[];
+  attachments: Attachment[];
   reservationRequest: ReservationRequestData | null;
 };
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getFileIcon(mimeType: string) {
+  if (mimeType.startsWith("image/")) return "🖼️";
+  if (mimeType === "application/pdf") return "📄";
+  if (mimeType.includes("spreadsheet") || mimeType.includes("excel")) return "📊";
+  if (mimeType.includes("word") || mimeType.includes("document")) return "📝";
+  return "📎";
+}
 
 const STATUS_BADGE: Record<string, string> = {
   NEW: "badge-new",
@@ -569,6 +593,34 @@ export default function TicketDetailPage() {
             <p className="text-foreground leading-relaxed whitespace-pre-wrap">{ticket.description}</p>
           </div>
 
+          {/* ── Attachments ──────────────────────────────────────── */}
+          {ticket.attachments && ticket.attachments.length > 0 && (
+            <div className="card">
+              <h3 className="text-sm font-semibold text-brand-gray-light uppercase tracking-wide mb-3">
+                📎 Attachments ({ticket.attachments.length})
+              </h3>
+              <div className="space-y-2">
+                {ticket.attachments.map((att) => (
+                  <a
+                    key={att.id}
+                    href={att.filePath}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-2 rounded-lg transition-colors"
+                    style={{ background: "#f9fafb", border: "1px solid var(--border-color)" }}
+                  >
+                    <span className="text-lg">{getFileIcon(att.mimeType)}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate" style={{ color: "var(--brand-primary)" }}>{att.fileName}</div>
+                      <div className="text-xs text-brand-gray-light">{formatFileSize(att.fileSize)}</div>
+                    </div>
+                    <span className="text-xs text-brand-gray-light">↗</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* ── Reservation Details ──────────────────────────────── */}
           {isReservationTicket && rr && (
             <div className="card reservation-detail-card">
@@ -850,7 +902,7 @@ export default function TicketDetailPage() {
 
                   {overrideSelectedSuggestion && (
                     <div className="card card-compact mb-3" style={{ background: "#f0fdf4", borderColor: "#bbf7d0" }}>
-                      <h5 className="text-sm font-semibold text-green-800 mb-2">📋 Selected Override Slot</h5>
+                      <h5 className="text-sm font-semibold text-green-800 mb-2">📋 Selected Slot</h5>
                       <div className="text-sm text-green-900 space-y-1">
                         <div><strong>Room:</strong> {overrideSelectedSuggestion.roomName} ({overrideSelectedSuggestion.campusName})</div>
                         <div><strong>Date:</strong> {overrideDate}</div>
