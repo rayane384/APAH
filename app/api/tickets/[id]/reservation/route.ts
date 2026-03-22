@@ -45,7 +45,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   const body = await request.json();
   const { action, adminNote, roomId, startAt, endAt, campusId } = body as {
-    action: "accept" | "decline" | "override";
+    action: "accept" | "decline" | "override" | "cancel";
     adminNote?: string;
     roomId?: string;
     startAt?: string;
@@ -55,9 +55,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   const rr = ticket.reservationRequest;
 
-  if (rr.status !== "PENDING") {
+  if (action === "accept" && rr.status !== "PENDING") {
     return NextResponse.json(
-      { error: `This reservation request has already been processed (${rr.status}).` },
+      { error: `Cannot accept: this request is already processed (${rr.status}).` },
+      { status: 400 }
+    );
+  }
+  if (action === "decline" && rr.status !== "PENDING") {
+    return NextResponse.json(
+      { error: `Cannot decline: this request is already processed (${rr.status}). Use cancel instead.` },
       { status: 400 }
     );
   }
@@ -90,7 +96,36 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // Create approved reservation
+      const datesToBook: { startAt: Date; endAt: Date }[] = [];
+      datesToBook.push({ startAt: rr.startAt, endAt: rr.endAt });
+
+      if (rr.isRecurring && rr.recurrenceEndDate) {
+        let nextStart = new Date(rr.startAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+        let nextEnd = new Date(rr.endAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+        while (nextStart <= rr.recurrenceEndDate) {
+          datesToBook.push({ startAt: new Date(nextStart), endAt: new Date(nextEnd) });
+          nextStart.setTime(nextStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+          nextEnd.setTime(nextEnd.getTime() + 7 * 24 * 60 * 60 * 1000);
+        }
+      }
+
+      for (let i = 0; i < datesToBook.length; i++) {
+        const d = datesToBook[i];
+        if (i > 0) {
+          const conflict = await tx.reservation.findFirst({
+            where: {
+              roomId: rr.roomId,
+              status: "APPROVED",
+              startAt: { lt: d.endAt },
+              endAt: { gt: d.startAt },
+            },
+          });
+          if (conflict) {
+            throw new Error(`Cannot accept: slot conflicts on ${d.startAt.toDateString()}.`);
+          }
+        }
+      }
+
       const reservation = await tx.reservation.create({
         data: {
           kind: "MANUAL",
@@ -102,6 +137,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           description: reservationDescription,
           createdFromRequestId: rr.id,
           createdById: user.id,
+          isRecurring: rr.isRecurring,
+          recurrenceEndDate: rr.recurrenceEndDate,
         },
       });
 
@@ -120,21 +157,29 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       // Update ticket status
       await tx.ticket.update({
         where: { id: ticket.id },
-        data: { status: "RESOLVED", assignedToId: user.id },
+        data: { status: "IN_PROGRESS", assignedToId: user.id },
       });
 
       // Record history
       await tx.ticketHistory.create({
         data: {
           ticketId: ticket.id,
-          action: "STATUS_CHANGED",
+          action: "RESERVATION_ACCEPTED",
           performedById: user.id,
-          oldStatus: ticket.status,
-          newStatus: "RESOLVED",
         },
       });
+      if (ticket.status !== "IN_PROGRESS") {
+        await tx.ticketHistory.create({
+          data: {
+            ticketId: ticket.id,
+            action: "STATUS_CHANGED",
+            performedById: user.id,
+            oldStatus: ticket.status,
+            newStatus: "IN_PROGRESS",
+          },
+        });
+      }
 
-      return reservation;
     });
 
     const updated = await prisma.ticket.findUnique({
@@ -172,7 +217,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           include: {
             room: { include: { campus: true, roomType: true } },
             campus: true,
-            approvedReservation: true,
+            approvedReservation: {
+              include: { room: true, campus: true }
+            },
           },
         },
       },
@@ -203,6 +250,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         data: { status: "DECLINED", assignedToId: user.id },
       });
 
+      await tx.ticketHistory.create({
+        data: {
+          ticketId: ticket.id,
+          action: "RESERVATION_DECLINED",
+          performedById: user.id,
+        },
+      });
       await tx.ticketHistory.create({
         data: {
           ticketId: ticket.id,
@@ -249,7 +303,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           include: {
             room: { include: { campus: true, roomType: true } },
             campus: true,
-            approvedReservation: true,
+            approvedReservation: {
+              include: { room: true, campus: true }
+            },
           },
         },
       },
@@ -288,13 +344,14 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       overrideCampusId = campusId || overrideRoom.campusId;
     }
 
-    // Check for conflicts on the override slot
+    // Check for conflicts on the override slot, excluding its current approved reservation
     const conflict = await prisma.reservation.findFirst({
       where: {
         roomId: overrideRoomId,
         status: "APPROVED",
         startAt: { lt: overrideEnd },
         endAt: { gt: overrideStart },
+        id: rr.approvedReservationId ? { not: rr.approvedReservationId } : undefined,
       },
     });
     if (conflict) {
@@ -305,6 +362,44 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
 
     await prisma.$transaction(async (tx) => {
+      const datesToBook: { startAt: Date; endAt: Date }[] = [];
+      datesToBook.push({ startAt: overrideStart, endAt: overrideEnd });
+
+      if (rr.isRecurring && rr.recurrenceEndDate) {
+        let nextStart = new Date(overrideStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+        let nextEnd = new Date(overrideEnd.getTime() + 7 * 24 * 60 * 60 * 1000);
+        while (nextStart <= rr.recurrenceEndDate) {
+          datesToBook.push({ startAt: new Date(nextStart), endAt: new Date(nextEnd) });
+          nextStart.setTime(nextStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+          nextEnd.setTime(nextEnd.getTime() + 7 * 24 * 60 * 60 * 1000);
+        }
+      }
+
+      for (let i = 0; i < datesToBook.length; i++) {
+        const d = datesToBook[i];
+        if (i > 0) {
+          const conflict = await tx.reservation.findFirst({
+            where: {
+              roomId: overrideRoomId,
+              status: "APPROVED",
+              startAt: { lt: d.endAt },
+              endAt: { gt: d.startAt },
+              id: rr.approvedReservationId ? { not: rr.approvedReservationId } : undefined,
+            },
+          });
+          if (conflict) {
+            throw new Error(`Cannot override: slot conflicts on ${d.startAt.toDateString()}.`);
+          }
+        }
+      }
+
+      // Delete existing reservation if replacing an already-approved one
+      if (rr.approvedReservationId) {
+        await tx.reservation.delete({
+          where: { id: rr.approvedReservationId }
+        });
+      }
+
       const reservation = await tx.reservation.create({
         data: {
           kind: "MANUAL",
@@ -316,6 +411,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           description: reservationDescription,
           createdFromRequestId: rr.id,
           createdById: user.id,
+          isRecurring: rr.isRecurring,
+          recurrenceEndDate: rr.recurrenceEndDate,
         },
       });
 
@@ -332,18 +429,28 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
       await tx.ticket.update({
         where: { id: ticket.id },
-        data: { status: "RESOLVED", assignedToId: user.id },
+        data: { status: "IN_PROGRESS", assignedToId: user.id },
       });
 
       await tx.ticketHistory.create({
         data: {
           ticketId: ticket.id,
-          action: "STATUS_CHANGED",
+          action: "RESERVATION_OVERRIDDEN",
           performedById: user.id,
-          oldStatus: ticket.status,
-          newStatus: "RESOLVED",
         },
       });
+
+      if (ticket.status !== "IN_PROGRESS") {
+        await tx.ticketHistory.create({
+          data: {
+            ticketId: ticket.id,
+            action: "STATUS_CHANGED",
+            performedById: user.id,
+            oldStatus: ticket.status,
+            newStatus: "IN_PROGRESS",
+          },
+        });
+      }
     });
 
     const updated = await prisma.ticket.findUnique({
@@ -381,7 +488,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           include: {
             room: { include: { campus: true, roomType: true } },
             campus: true,
-            approvedReservation: true,
+            approvedReservation: {
+              include: { room: true, campus: true }
+            },
           },
         },
       },
@@ -390,5 +499,99 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json(updated);
   }
 
-  return NextResponse.json({ error: "Invalid action. Use: accept, decline, or override." }, { status: 400 });
+  // ── CANCEL ─────────────────────────────────────────────────────
+  if (action === "cancel") {
+    if (rr.status !== "ACCEPTED" && rr.status !== "OVERRIDDEN") {
+      return NextResponse.json({ error: "Only accepted or overridden reservations can be cancelled." }, { status: 400 });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (rr.approvedReservationId) {
+        await tx.reservation.delete({ where: { id: rr.approvedReservationId } });
+      }
+
+      await tx.reservationRequest.update({
+        where: { id: rr.id },
+        data: {
+          status: "CANCELLED",
+          processedById: user.id,
+          processedAt: new Date(),
+          adminNote: adminNote?.trim() || "Cancelled by admin",
+          approvedReservationId: null,      // Ensure it is disconnected
+        },
+      });
+
+      await tx.ticket.update({
+        where: { id: ticket.id },
+        data: { status: "DECLINED", assignedToId: user.id },
+      });
+
+      await tx.ticketHistory.create({
+        data: {
+          ticketId: ticket.id,
+          action: "RESERVATION_CANCELLED",
+          performedById: user.id,
+        },
+      });
+
+      if (ticket.status !== "DECLINED") {
+        await tx.ticketHistory.create({
+          data: {
+            ticketId: ticket.id,
+            action: "STATUS_CHANGED",
+            performedById: user.id,
+            oldStatus: ticket.status,
+            newStatus: "DECLINED",
+          },
+        });
+      }
+    });
+
+    const updated = await prisma.ticket.findUnique({
+      where: { id },
+      include: {
+        category: { select: { id: true, name: true, code: true, isReservation: true, isOther: true } },
+        createdBy: {
+          select: {
+            id: true, fullName: true, email: true, role: true, profile: true,
+            department: { select: { id: true, name: true, code: true } },
+          },
+        },
+        assignedDepartment: { select: { id: true, name: true, code: true } },
+        assignedTo: { select: { id: true, fullName: true, email: true } },
+        routedTo: {
+          select: { id: true, assignedDepartment: { select: { id: true, name: true, code: true } } },
+        },
+        routedFrom: {
+          select: { id: true, assignedDepartment: { select: { id: true, name: true, code: true } } },
+        },
+        comments: {
+          include: {
+            author: {
+              select: {
+                id: true,
+                fullName: true,
+                role: true,
+                department: { select: { id: true, name: true, code: true } },
+              },
+            },
+          },
+          orderBy: { createdAt: "asc" as const },
+        },
+        reservationRequest: {
+          include: {
+            room: { include: { campus: true, roomType: true } },
+            campus: true,
+            approvedReservation: {
+              include: { room: true, campus: true }
+            },
+          },
+        },
+      },
+    });
+
+    return NextResponse.json(updated);
+  }
+
+  return NextResponse.json({ error: "Invalid action. Use: accept, decline, override, or cancel." }, { status: 400 });
 }

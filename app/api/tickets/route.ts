@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
 import { getCurrentUser, isAdmin } from "../../lib/auth-helpers";
 
+const ALLOWED_RESERVATION_DURATIONS = new Set([60, 75, 90, 105, 120]);
+
 /**
  * GET /api/tickets
  * - ADMIN: returns tickets assigned to their department
@@ -76,12 +78,13 @@ export async function GET(request: NextRequest) {
  * Create a new ticket. Body: { categoryId, subtype?, description }
  */
 export async function POST(request: NextRequest) {
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-  const body = await request.json();
+    const body = await request.json();
   const { categoryId, subtype, description, assignedDepartmentId: targetDeptId } = body as {
     categoryId: string;
     subtype?: string;
@@ -133,6 +136,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "startAt must be before endAt." }, { status: 400 });
     }
 
+    const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
+    if (!ALLOWED_RESERVATION_DURATIONS.has(durationMinutes)) {
+      return NextResponse.json(
+        { error: "Reservation duration must be one of: 60, 75, 90, 105, 120 minutes." },
+        { status: 400 }
+      );
+    }
+
     // Validate room exists and get its campus
     const room = await prisma.room.findUnique({
       where: { id: roomId },
@@ -160,8 +171,6 @@ export async function POST(request: NextRequest) {
 
     // Compute slot start minute for demand tracking
     const slotStartMinute = start.getUTCHours() * 60 + start.getUTCMinutes();
-    const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
-
     // Transaction: create ticket + reservation request + upsert demand
     const result = await prisma.$transaction(async (tx) => {
       const newTicket = await tx.ticket.create({
@@ -185,6 +194,8 @@ export async function POST(request: NextRequest) {
           adminCanAdjust: adminCanAdjust ?? false,
           periodOfDay: (periodOfDay as "ANY" | "BEFORE_MIDDAY" | "AFTER_MIDDAY") ?? "ANY",
           status: "PENDING",
+          isRecurring: isAdmin(user) ? (body as any).isRecurring ?? false : false,
+          recurrenceEndDate: isAdmin(user) && (body as any).isRecurring ? new Date((body as any).recurrenceEndDate) : null,
         },
       });
 
@@ -244,21 +255,25 @@ export async function POST(request: NextRequest) {
   }
 
   // Create the ticket
-  const ticket = await prisma.ticket.create({
-    data: {
-      categoryId: category.id,
-      subtype: subtype?.trim() || null,
-      description: description.trim(),
-      createdById: user.id,
-      assignedDepartmentId,
-      status: "NEW",
-    },
-    include: {
-      category: { select: { id: true, name: true, code: true } },
-      createdBy: { select: { id: true, fullName: true, email: true } },
-      assignedDepartment: { select: { id: true, name: true, code: true } },
-    },
-  });
+    const ticket = await prisma.ticket.create({
+      data: {
+        categoryId: category.id,
+        subtype: subtype?.trim() || null,
+        description: description.trim(),
+        createdById: user.id,
+        assignedDepartmentId,
+        status: "NEW",
+      },
+      include: {
+        category: { select: { id: true, name: true, code: true } },
+        createdBy: { select: { id: true, fullName: true, email: true } },
+        assignedDepartment: { select: { id: true, name: true, code: true } },
+      },
+    });
 
-  return NextResponse.json(ticket, { status: 201 });
+    return NextResponse.json(ticket, { status: 201 });
+  } catch (err: any) {
+    console.error("Ticket POST Error:", err);
+    return NextResponse.json({ error: err.message || String(err) }, { status: 500 });
+  }
 }

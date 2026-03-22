@@ -62,6 +62,8 @@ export async function GET(request: NextRequest, { params }: Params) {
     },
     include: {
       createdBy: { select: { id: true, fullName: true } },
+      createdFromRequest: { select: { ticketId: true } },
+      approvedByRequest: { select: { ticketId: true } },
     },
     orderBy: { startAt: "asc" },
   });
@@ -80,6 +82,8 @@ export async function GET(request: NextRequest, { params }: Params) {
     },
     include: {
       createdBy: { select: { id: true, fullName: true } },
+      createdFromRequest: { select: { ticketId: true } },
+      approvedByRequest: { select: { ticketId: true } },
     },
   });
 
@@ -117,6 +121,11 @@ export async function GET(request: NextRequest, { params }: Params) {
             startAt: occurrenceStart.toISOString(),
             endAt: occurrenceEnd.toISOString(),
             createdBy: res.createdBy,
+            ticketId: res.createdFromRequest?.ticketId ?? res.approvedByRequest?.ticketId ?? null,
+            manualReservationId:
+              res.kind === "MANUAL" && !(res.createdFromRequest?.ticketId ?? res.approvedByRequest?.ticketId)
+                ? res.id
+                : null,
           });
         }
         break;
@@ -134,6 +143,11 @@ export async function GET(request: NextRequest, { params }: Params) {
     startAt: r.startAt.toISOString(),
     endAt: r.endAt.toISOString(),
     createdBy: r.createdBy,
+    ticketId: r.createdFromRequest?.ticketId ?? r.approvedByRequest?.ticketId ?? null,
+    manualReservationId:
+      r.kind === "MANUAL" && !(r.createdFromRequest?.ticketId ?? r.approvedByRequest?.ticketId)
+        ? r.id
+        : null,
   }));
 
   return NextResponse.json({

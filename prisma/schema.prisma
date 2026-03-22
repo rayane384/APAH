@@ -45,6 +45,10 @@ enum TicketHistoryAction {
   UNPICKED
   ROUTED
   STATUS_CHANGED
+  RESERVATION_ACCEPTED
+  RESERVATION_DECLINED
+  RESERVATION_OVERRIDDEN
+  RESERVATION_CANCELLED
 }
 
 enum ReservationRequestStatus {
@@ -317,6 +321,9 @@ model ReservationRequest {
   adminCanAdjust Boolean @default(false)
 
   periodOfDay PeriodOfDay @default(ANY)
+
+  isRecurring Boolean @default(false)
+  recurrenceEndDate DateTime?
 
   processedById String?
   processedBy   User? @relation("ReservationRequestProcessedBy", fields: [processedById], references: [id])

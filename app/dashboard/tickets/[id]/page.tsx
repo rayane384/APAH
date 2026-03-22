@@ -34,11 +34,15 @@ type ReservationSuggestion = {
   endAt: string;
   pendingCount: number;
   historicalDemand: number;
+  isTaken?: boolean;
+  takenTicketId?: string;
+  takenReservationId?: string;
+  takenReservationKind?: "MANUAL" | "STANDARD_SCHEDULE";
 };
 
 type HistoryEntry = {
   id: string;
-  action: "PICKED" | "UNPICKED" | "ROUTED" | "STATUS_CHANGED";
+  action: "PICKED" | "UNPICKED" | "ROUTED" | "STATUS_CHANGED" | "RESERVATION_ACCEPTED" | "RESERVATION_DECLINED" | "RESERVATION_OVERRIDDEN" | "RESERVATION_CANCELLED";
   performedBy: { id: string; fullName: string };
   oldStatus: string | null;
   newStatus: string | null;
@@ -73,6 +77,8 @@ type ReservationRequestData = {
     startAt: string;
     endAt: string;
     description: string;
+    room?: { name: string };
+    campus?: { name: string };
   } | null;
 };
 
@@ -171,6 +177,10 @@ const HISTORY_META: Record<string, { icon: string; label: string }> = {
   UNPICKED: { icon: "↩️", label: "Released" },
   ROUTED: { icon: "🔀", label: "Routed" },
   STATUS_CHANGED: { icon: "🔄", label: "Status changed" },
+  RESERVATION_ACCEPTED: { icon: "✅", label: "Reservation Accepted" },
+  RESERVATION_DECLINED: { icon: "❌", label: "Reservation Declined" },
+  RESERVATION_OVERRIDDEN: { icon: "🔧", label: "Reservation Overridden" },
+  RESERVATION_CANCELLED: { icon: "🗑", label: "Reservation Cancelled" },
 };
 
 function formatTimeUTC(iso: string) {
@@ -182,6 +192,13 @@ function formatDateUTC(iso: string) {
   const d = new Date(iso);
   return d.toISOString().split("T")[0];
 }
+
+const START_TIME_OPTIONS = Array.from({ length: 37 }, (_, i) => {
+  const totalMinutes = 8 * 60 + 30 + i * 15;
+  const hour = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+});
 
 export default function TicketDetailPage() {
   const { id } = useParams() as { id: string };
@@ -207,6 +224,7 @@ export default function TicketDetailPage() {
   const [showAcceptModal, setShowAcceptModal] = useState(false);
   const [showDeclineModal, setShowDeclineModal] = useState(false);
   const [showOverrideModal, setShowOverrideModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
   const [declineNote, setDeclineNote] = useState("");
   const [processingReservation, setProcessingReservation] = useState(false);
 
@@ -220,6 +238,7 @@ export default function TicketDetailPage() {
   const [overrideFilterPeriod, setOverrideFilterPeriod] = useState("");
   const [overrideFilterDuration, setOverrideFilterDuration] = useState("120");
   const [overrideFilterStartHour, setOverrideFilterStartHour] = useState("");
+  const [overrideIncludeTaken, setOverrideIncludeTaken] = useState(false);
   const [allCampuses, setAllCampuses] = useState<Campus[]>([]);
   const [allRoomTypes, setAllRoomTypes] = useState<RoomType[]>([]);
 
@@ -282,7 +301,8 @@ export default function TicketDetailPage() {
         if (overrideFilterRoomTypeId) params.set("roomTypeId", overrideFilterRoomTypeId);
         if (overrideFilterPeriod) params.set("period", overrideFilterPeriod);
         if (overrideFilterDuration) params.set("durationMin", overrideFilterDuration);
-        if (overrideFilterStartHour) params.set("startHour", overrideFilterStartHour);
+        if (overrideFilterStartHour) params.set("startTime", overrideFilterStartHour);
+        if (overrideIncludeTaken) params.set("includeTaken", "true");
 
         const res = await fetch(`/api/reservations/suggestions?${params.toString()}`, {
           signal: controller.signal,
@@ -315,6 +335,7 @@ export default function TicketDetailPage() {
     overrideFilterPeriod,
     overrideFilterDuration,
     overrideFilterStartHour,
+    overrideIncludeTaken,
   ]);
 
   async function fetchHistory() {
@@ -464,6 +485,23 @@ export default function TicketDetailPage() {
     setProcessingReservation(false);
   }
 
+  async function handleCancelReservation() {
+    setProcessingReservation(true);
+    const res = await fetch(`/api/tickets/${id}/reservation`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "cancel" }),
+    });
+    if (res.ok) {
+      setTicket(await res.json());
+      setShowCancelModal(false);
+    } else {
+      const data = await res.json();
+      setError(data.error ?? "Failed to cancel reservation.");
+    }
+    setProcessingReservation(false);
+  }
+
   async function openOverrideModal() {
     const initialDate = rr ? formatDateUTC(rr.startAt) : new Date().toISOString().split("T")[0];
     setOverrideDate(initialDate);
@@ -473,6 +511,7 @@ export default function TicketDetailPage() {
     setOverrideFilterPeriod("");
     setOverrideFilterDuration("120");
     setOverrideFilterStartHour("");
+    setOverrideIncludeTaken(false);
     setShowOverrideModal(true);
 
     try {
@@ -670,17 +709,19 @@ export default function TicketDetailPage() {
               {rr.approvedReservation && (
                 <div className="mt-3 p-3 rounded-lg" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
                   <div className="text-xs text-green-800 font-semibold uppercase mb-1">✅ Approved Reservation</div>
-                  <p className="text-sm text-green-900">
-                    {formatTimeUTC(rr.approvedReservation.startAt)} – {formatTimeUTC(rr.approvedReservation.endAt)}
-                    {" • "}{rr.approvedReservation.description}
-                  </p>
+                  <div className="text-sm text-green-900">
+                    <strong>Room:</strong> {rr.approvedReservation.room?.name} ({rr.approvedReservation.campus?.name})<br/>
+                    <strong>Date:</strong> {formatDateUTC(rr.approvedReservation.startAt)}<br/>
+                    <strong>Time:</strong> {formatTimeUTC(rr.approvedReservation.startAt)} – {formatTimeUTC(rr.approvedReservation.endAt)}<br/>
+                    <span className="text-xs mt-1 block opacity-80">{rr.approvedReservation.description}</span>
+                  </div>
                 </div>
               )}
             </div>
           )}
 
           {/* ── Reservation Admin Actions ──────────────────────── */}
-          {isReservationTicket && isDeptAdmin && rr?.status === "PENDING" && (
+          {isReservationTicket && isDeptAdmin && (rr?.status === "PENDING" || rr?.status === "ACCEPTED" || rr?.status === "OVERRIDDEN") && (
             <div className="card">
               <h3 className="text-sm font-semibold text-brand-gray-light uppercase tracking-wide mb-3">
                 Reservation Actions
@@ -719,28 +760,50 @@ export default function TicketDetailPage() {
               )}
 
               <div className="flex flex-wrap gap-2 mb-4">
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => setShowAcceptModal(true)}
-                  disabled={processingReservation || !isPickedByMe}
-                >
-                  ✅ Accept
-                </button>
-                <button
-                  className="btn btn-sm"
-                  style={{ background: "#dc2626", color: "#fff" }}
-                  onClick={() => setShowDeclineModal(true)}
-                  disabled={processingReservation || !isPickedByMe}
-                >
-                  ❌ Decline
-                </button>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={openOverrideModal}
-                  disabled={processingReservation || !isPickedByMe}
-                >
-                  🔧 Override
-                </button>
+                {rr?.status === "PENDING" ? (
+                  <>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => setShowAcceptModal(true)}
+                      disabled={processingReservation || !isPickedByMe}
+                    >
+                      ✅ Accept
+                    </button>
+                    <button
+                      className="btn btn-sm"
+                      style={{ background: "#dc2626", color: "#fff" }}
+                      onClick={() => setShowDeclineModal(true)}
+                      disabled={processingReservation || !isPickedByMe}
+                    >
+                      ❌ Decline
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={openOverrideModal}
+                      disabled={processingReservation || !isPickedByMe}
+                    >
+                      🔧 Override
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      className="btn btn-sm"
+                      style={{ background: "#dc2626", color: "#fff" }}
+                      onClick={() => setShowCancelModal(true)}
+                      disabled={processingReservation || !isPickedByMe}
+                    >
+                      🗑 Cancel Reservation
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={openOverrideModal}
+                      disabled={processingReservation || !isPickedByMe}
+                    >
+                      ✏️ Edit / Override
+                    </button>
+                  </>
+                )}
               </div>
 
               {/* Accept modal */}
@@ -788,6 +851,29 @@ export default function TicketDetailPage() {
                     </button>
                     <button className="btn btn-outline btn-sm" onClick={() => { setShowDeclineModal(false); setDeclineNote(""); }}>
                       Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Cancel modal */}
+              {showCancelModal && (
+                <div className="mt-3 p-4 rounded-lg" style={{ background: "#fef2f2", border: "1px solid #fecaca" }}>
+                  <h4 className="text-sm font-semibold text-red-800 mb-2">Cancel Reservation</h4>
+                  <p className="text-sm text-red-900 mb-3">
+                    Are you sure you want to cancel this approved reservation? This will free up the room and decline the ticket.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      className="btn btn-sm"
+                      style={{ background: "#dc2626", color: "#fff" }}
+                      onClick={handleCancelReservation}
+                      disabled={processingReservation}
+                    >
+                      {processingReservation ? "Processing…" : "Confirm Cancel"}
+                    </button>
+                    <button className="btn btn-outline btn-sm" onClick={() => setShowCancelModal(false)}>
+                      Go Back
                     </button>
                   </div>
                 </div>
@@ -842,19 +928,34 @@ export default function TicketDetailPage() {
                       <label className="form-label text-xs">Duration</label>
                       <select className="form-select" value={overrideFilterDuration} onChange={(e) => { setOverrideFilterDuration(e.target.value); setOverrideSelectedSuggestion(null); }}>
                         <option value="60">1 hour</option>
+                        <option value="75">1.25 hours</option>
                         <option value="90">1.5 hours</option>
+                        <option value="105">1.75 hours</option>
                         <option value="120">2 hours</option>
                       </select>
                     </div>
                     <div>
-                      <label className="form-label text-xs">Start Hour</label>
+                      <label className="form-label text-xs">Start Time</label>
                       <select className="form-select" value={overrideFilterStartHour} onChange={(e) => { setOverrideFilterStartHour(e.target.value); setOverrideSelectedSuggestion(null); }}>
                         <option value="">Any</option>
-                        {Array.from({ length: 10 }, (_, i) => i + 8).map((h) => (
-                          <option key={h} value={String(h)}>{h}:00</option>
+                        {START_TIME_OPTIONS.map((time) => (
+                          <option key={time} value={time}>{time}</option>
                         ))}
                       </select>
                     </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 mb-2">
+                    <input
+                      type="checkbox"
+                      id="overrideIncludeTaken"
+                      checked={overrideIncludeTaken}
+                      onChange={(e) => { setOverrideIncludeTaken(e.target.checked); setOverrideSelectedSuggestion(null); }}
+                      className="w-4 h-4 accent-brand-primary rounded"
+                    />
+                    <label htmlFor="overrideIncludeTaken" className="text-sm font-medium cursor-pointer">
+                      Include Taken Slots
+                    </label>
                   </div>
 
                   <h5 className="text-sm font-semibold text-brand-gray-light uppercase tracking-wide mb-2">
@@ -871,11 +972,21 @@ export default function TicketDetailPage() {
                     <div className="suggestion-grid mb-3">
                       {overrideSuggestions.map((s, i) => {
                         const isSelected = overrideSelectedSuggestion?.roomId === s.roomId && overrideSelectedSuggestion?.startAt === s.startAt;
+                        const takenLinkHref = s.takenTicketId
+                          ? `/dashboard/tickets/${s.takenTicketId}`
+                          : s.takenReservationKind === "MANUAL" && s.takenReservationId
+                            ? `/dashboard/manual-reservation-history/${s.takenReservationId}`
+                            : null;
+                        const takenLinkLabel = s.takenTicketId
+                          ? "View Ticket"
+                          : s.takenReservationKind === "MANUAL" && s.takenReservationId
+                            ? "View Record"
+                            : null;
                         return (
                           <div
                             key={`${s.roomId}-${s.startAt}-${i}`}
-                            className={`suggestion-card ${isSelected ? "suggestion-card-selected" : ""}`}
-                            onClick={() => setOverrideSelectedSuggestion(s)}
+                            className={`suggestion-card ${isSelected ? "suggestion-card-selected" : ""} ${s.isTaken ? "opacity-60 cursor-not-allowed bg-red-50" : "cursor-pointer"}`}
+                            onClick={() => !s.isTaken && setOverrideSelectedSuggestion(s)}
                           >
                             <div className="flex items-center justify-between mb-1">
                               <span className="font-semibold text-sm">{s.roomName}</span>
@@ -888,10 +999,25 @@ export default function TicketDetailPage() {
                               <div className="text-xs text-brand-gray-light mt-0.5">{s.roomTypeName}</div>
                             )}
                             <div className="flex items-center gap-2 mt-2">
-                              {s.pendingCount > 0 ? (
+                              {s.isTaken ? (
+                                <span className="text-xs text-red-600 font-medium">
+                                  ❌ Taken (cannot select)
+                                  {takenLinkHref && takenLinkLabel && (
+                                    <a
+                                      href={takenLinkHref}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="ml-2 underline text-red-700 hover:text-red-900"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      {takenLinkLabel}
+                                    </a>
+                                  )}
+                                </span>
+                              ) : s.pendingCount > 0 ? (
                                 <span className="pending-badge">⏳ {s.pendingCount} pending</span>
                               ) : (
-                                <span className="text-xs text-green-600 font-medium">✓ No pending requests</span>
+                                <span className="text-xs text-green-600 font-medium">✓ Available</span>
                               )}
                             </div>
                           </div>

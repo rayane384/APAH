@@ -50,12 +50,12 @@ const ticketInclude = {
         },
       },
       campus: { select: { id: true, name: true, code: true } },
-      approvedReservation: true,
+      approvedReservation: {
+        include: { room: true, campus: true }
+      },
     },
   },
-  attachments: {
-    orderBy: { createdAt: "asc" as const },
-  },
+  attachments: true,
 };
 
 /* ── Status workflow: valid transitions ──────────────────── */

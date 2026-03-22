@@ -9,6 +9,7 @@ declare module "next-auth" {
       role?: string;
       profile?: string | null;
       departmentId?: string | null;
+      isReservationAdmin?: boolean;
     };
   }
 }

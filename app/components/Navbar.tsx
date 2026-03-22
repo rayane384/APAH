@@ -4,18 +4,27 @@ import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { useEffect } from "react";
 
 export default function Navbar() {
   const { data: session } = useSession();
   const pathname = usePathname();
   const user = session?.user;
 
+  useEffect(() => {
+    // Lazy cron trigger to resolve scheduled tickets whose time has passed
+    fetch("/api/cron/resolve-tickets").catch(() => {});
+  }, []);
+
   const links = [
     { href: "/dashboard", label: "Dashboard", exact: true },
     { href: "/dashboard/tickets", label: "Tickets", exact: false },
     { href: "/dashboard/tickets/new", label: "New Ticket", exact: true },
-    ...(user?.role === "ADMIN"
-      ? [{ href: "/dashboard/timetable", label: "Timetable", exact: true }]
+    ...(user?.role === "ADMIN" && user?.isReservationAdmin
+      ? [
+          { href: "/dashboard/timetable", label: "Timetable", exact: true },
+          { href: "/dashboard/manual-reservation-history", label: "Manual History", exact: false },
+        ]
       : []),
   ];
 
